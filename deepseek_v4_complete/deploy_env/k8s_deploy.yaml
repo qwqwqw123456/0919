@@ -1,11 +1,1059 @@
+# =============================================================================
+# DeepSeek V4 Kubernetes 部署配置
+# =============================================================================
+# 完整的生产级 Kubernetes 部署配置
+# 包含 Deployment、Service、ConfigMap、Secret、Ingress、HorizontalPodAutoscaler 等
+#
+# 使用方法：
+#   kubectl apply -f k8s_deploy.yaml
+#   kubectl delete -f k8s_deploy.yaml
+
+# =============================================================================
+# API 版本和元数据
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deepseek
+  labels:
+    app: deepseek-v4
+    environment: production
+
+---
+# =============================================================================
+# ConfigMap - 应用配置
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deepseek-config
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: config
+spec:
+  # 服务配置
+  SERVICE_NAME: deepseek-api
+  SERVICE_PORT: "8000"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+
+  # API 配置
+  API_PREFIX: "/api/v1"
+  API_RATE_LIMIT: "100"
+  API_TIMEOUT: "300"
+
+  # 模型配置
+  MODEL_PATH: "/app/models"
+  MODEL_MAX_LENGTH: "4096"
+  MODEL_BATCH_SIZE: "8"
+
+  # CORS 配置
+  CORS_ORIGINS: "*"
+
+  # 健康检查路径
+  HEALTH_CHECK_PATH: "/health"
+  READINESS_CHECK_PATH: "/ready"
+
+---
+# =============================================================================
+# Secret - 敏感信息（生产环境应使用 Vault 或云服务商 KMS）
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: deepseek-secrets
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: secrets
+type: Opaque
+stringData:
+  # 数据库配置
+  MYSQL_HOST: "mysql-service"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "deepseek"
+  MYSQL_USER: "deepseek"
+  MYSQL_PASSWORD: "changeme-in-production"
+
+  # Redis 配置
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_PASSWORD: ""
+
+  # JWT 配置
+  JWT_SECRET_KEY: "changeme-in-production-use-strong-secret"
+  JWT_ALGORITHM: "HS256"
+  JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+
+---
+# =============================================================================
+# StorageClass - 存储类定义
+# =============================================================================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: deepseek-storage
+  labels:
+    app: deepseek-v4
+provisioner: kubernetes.io/aws-ebs  # 根据实际云服务商调整
+parameters:
+  type: gp3
+  fsType: ext4
+  encrypted: "true"
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+
+---
+# =============================================================================
+# PersistentVolumeClaim - MySQL 数据持久化
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: mysql
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: deepseek-storage
+  resources:
+    requests:
+      storage: 50Gi
+  selector:
+    matchLabels:
+      type: mysql-data
+
+---
+# =============================================================================
+# PersistentVolumeClaim - Redis 数据持久化
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: deepseek-storage
+  resources:
+    requests:
+      storage: 10Gi
+  selector:
+    matchLabels:
+      type: redis-data
+
+---
+# =============================================================================
+# PersistentVolumeClaim - 模型文件存储
+# =============================================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-pvc
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: models
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: deepseek-storage
+  resources:
+    requests:
+      storage: 100Gi
+  selector:
+    matchLabels:
+      type: models-data
+
+---
+# =============================================================================
+# ServiceAccount - 服务账号
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deepseek-sa
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+
+---
+# =============================================================================
+# Role - RBAC 角色
+# =============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deepseek-role
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+
+---
+# =============================================================================
+# RoleBinding - 角色绑定
+# =============================================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deepseek-rolebinding
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+subjects:
+  - kind: ServiceAccount
+    name: deepseek-sa
+    namespace: deepseek
+roleRef:
+  kind: Role
+  name: deepseek-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# =============================================================================
+# MySQL Deployment
+# =============================================================================
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: deepseek-v4
+  name: mysql
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: mysql
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: deepseek-v4
+      component: mysql
+  strategy:
+    type: Recreate
   template:
+    metadata:
+      labels:
+        app: deepseek-v4
+        component: mysql
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9104"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: deepseek-sa
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mysql
+              containerPort: 3306
+              protocol: TCP
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_CHARSET
+              value: "utf8mb4"
+            - name: MYSQL_COLLATION
+              value: "utf8mb4_unicode_ci"
+            - name: TZ
+              value: "Asia/Shanghai"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-config
+              mountPath: /etc/mysql/conf.d
+            - name: mysql-init
+              mountPath: /docker-entrypoint-initdb.d
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+                - -uroot
+                - -p${MYSQL_ROOT_PASSWORD}
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["mysqladmin", "shutdown"]
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+        - name: mysql-config
+          configMap:
+            name: deepseek-mysql-config
+        - name: mysql-init
+          configMap:
+            name: deepseek-mysql-init
+
+---
+# =============================================================================
+# MySQL Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: mysql
+spec:
+  type: ClusterIP
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+      protocol: TCP
+  selector:
+    app: deepseek-v4
+    component: mysql
+
+---
+# =============================================================================
+# Redis Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: deepseek-v4
+      component: redis
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: deepseek-v4
+        component: redis
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: deepseek-sa
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --maxmemory
+            - 1gb
+            - --maxmemory-policy
+            - allkeys-lru
+            - --save
+            - "900"
+            - "1"
+            - --save
+            - "300"
+            - "10"
+            - --save
+            - "60"
+            - "10000"
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-pvc
+
+---
+# =============================================================================
+# Redis Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: redis
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+  selector:
+    app: deepseek-v4
+    component: redis
+
+---
+# =============================================================================
+# API Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-api
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: deepseek-v4
+      component: api
+  # 滚动更新策略
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: deepseek-v4
+        component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: deepseek-sa
+      # GPU 配置（需要 GPU Operator）
+      # nodeSelector:
+      #   nvidia.com/gpu: "true"
+      # tolerations:
+      #   - key: "nvidia.com/gpu"
+      #     operator: "Exists"
+      #     effect: "NoSchedule"
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: deepseek_v4_api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            # 从 ConfigMap 读取配置
+            - name: SERVICE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: deepseek-config
+                  key: SERVICE_NAME
+            - name: SERVICE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: deepseek-config
+                  key: SERVICE_PORT
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: deepseek-config
+                  key: LOG_LEVEL
+            - name: MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: deepseek-config
+                  key: MODEL_PATH
+            - name: MODEL_MAX_LENGTH
+              valueFrom:
+                configMapKeyRef:
+                  name: deepseek-config
+                  key: MODEL_MAX_LENGTH
+            - name: MODEL_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: deepseek-config
+                  key: MODEL_BATCH_SIZE
+            # 从 Secret 读取敏感信息
+            - name: MYSQL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_HOST
+            - name: MYSQL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_PORT
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: MYSQL_PASSWORD
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: REDIS_PORT
+            - name: REDIS_DB
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: REDIS_DB
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: REDIS_PASSWORD
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: JWT_SECRET_KEY
+            - name: JWT_ALGORITHM
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: JWT_ALGORITHM
+            - name: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+              valueFrom:
+                secretKeyRef:
+                  name: deepseek-secrets
+                  key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+            # NVIDIA GPU 配置
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+              # nvidia.com/gpu: 1
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              # nvidia.com/gpu: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+              readOnly: true
+            - name: cache
+              mountPath: /app/cache
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: models-pvc
+        - name: cache
+          emptyDir:
+            sizeLimit: 5Gi
+
+---
+# =============================================================================
+# API Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: deepseek-api-service
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: api
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: deepseek-v4
+    component: api
+
+---
+# =============================================================================
+# HorizontalPodAutoscaler - API 自动扩缩容
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: deepseek-api-hpa
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: deepseek-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+
+---
+# =============================================================================
+# WebUI Deployment
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deepseek-webui
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: webui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: deepseek-v4
+      component: webui
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: deepseek-v4
+        component: webui
     spec:
       containers:
-      - name: api
-        image: deepseek-v4:latest
+        - name: webui
+          image: deepseek_v4_webui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+
+---
+# =============================================================================
+# WebUI Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: deepseek-webui-service
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    component: webui
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: deepseek-v4
+    component: webui
+
+---
+# =============================================================================
+# Ingress - HTTP/HTTPS 入口
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: deepseek-ingress
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+  annotations:
+    # Nginx Ingress Controller 配置
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/websocket-services: "deepseek-api-service"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+    # 限流
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    # 安全响应头
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - deepseek.example.com
+      secretName: deepseek-tls-secret
+  rules:
+    - host: deepseek.example.com
+      http:
+        paths:
+          # API 路由
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: deepseek-api-service
+                port:
+                  number: 8000
+          # WebSocket 路由
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: deepseek-api-service
+                port:
+                  number: 8000
+          # 文档路由
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: deepseek-api-service
+                port:
+                  number: 8000
+          - path: /openapi.json
+            pathType: Exact
+            backend:
+              service:
+                name: deepseek-api-service
+                port:
+                  number: 8000
+          # 指标路由
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: deepseek-api-service
+                port:
+                  number: 8000
+          # WebUI 路由（默认）
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: deepseek-webui-service
+                port:
+                  number: 80
+
+---
+# =============================================================================
+# PodDisruptionBudget - 防止同时停止过多 Pod
+# =============================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: deepseek-api-pdb
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: deepseek-v4
+      component: api
+
+---
+# =============================================================================
+# Prometheus ServiceMonitor - 监控配置
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: deepseek-api-monitor
+  namespace: deepseek
+  labels:
+    app: deepseek-v4
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: deepseek-v4
+  namespaceSelector:
+    matchNames:
+      - deepseek
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# =============================================================================
+# 辅助 ConfigMap（MySQL 配置）
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deepseek-mysql-config
+  namespace: deepseek
+data:
+  my.cnf: |
+    [mysqld]
+    max_connections = 200
+    innodb_buffer_pool_size = 512M
+    innodb_log_file_size = 128M
+    innodb_flush_log_at_trx_commit = 2
+    innodb_flush_method = O_DIRECT
+    slow_query_log = 1
+    slow_query_log_file = /var/lib/mysql/slow.log
+    long_query_time = 2
+
+---
+# =============================================================================
+# 辅助 ConfigMap（MySQL 初始化脚本）
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deepseek-mysql-init
+  namespace: deepseek
+data:
+  01-init.sql: |
+    -- DeepSeek 初始化脚本
+    CREATE DATABASE IF NOT EXISTS deepseek CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    USE deepseek;
+
+    -- 用户表
+    CREATE TABLE IF NOT EXISTS users (
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        username VARCHAR(50) NOT NULL UNIQUE,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        is_superuser BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_username (username),
+        INDEX idx_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+---
+# =============================================================================
+# Secret - TLS 证书（生产环境使用 cert-manager 自动管理）
+# =============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: deepseek-tls-secret
+  namespace: deepseek
+type: kubernetes.io/tls
+data:
+  # Base64 编码的证书和私钥
+  # 生产环境应使用 cert-manager 自动申请 Let's Encrypt 证书
+  # 或者手动使用真实证书替换
+  # 生成自签名证书：
+  # openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  #   -keyout tls.key -out tls.crt -subj "/CN=deepseek.example.com"
+  # 填入时请替换为真实数据
+  tls.crt: ""
+  tls.key: ""
+
+---
+# =============================================================================
+# 配置备忘
+# =============================================================================
+# 部署步骤：
+#
+# 1. 准备镜像（推送到镜像仓库）
+#    docker build -t your-registry/deepseek_v4_api:latest .
+#    docker push your-registry/deepseek_v4_api:latest
+#
+# 2. 创建命名空间
+#    kubectl create namespace deepseek
+#
+# 3. 部署配置
+#    kubectl apply -f k8s_deploy.yaml
+#
+# 4. 检查部署状态
+#    kubectl -n deepseek get pods
+#    kubectl -n deepseek get services
+#    kubectl -n deepseek get ingress
+#
+# 5. 查看日志
+#    kubectl -n deepseek logs -l app=deepseek-v4,component=api
+#
+# 6. 扩缩容
+#    kubectl -n deepseek scale deployment deepseek-api --replicas=5
+#
+# 7. 更新镜像
+#    kubectl -n deepseek set image deployment/deepseek-api api=your-registry/deepseek_v4_api:v1.1.0
+#
+# 8. 回滚
+#    kubectl -n deepseek rollout undo deployment/deepseek-api
+#
+# 9. 删除所有资源
+#    kubectl delete -f k8s_deploy.yaml
+#
+# 前置条件：
+# - Kubernetes 1.19+
+# - Nginx Ingress Controller
+# - Metrics Server (用于 HPA)
+# - Prometheus Operator (可选，用于监控)
+# - NVIDIA GPU Operator (可选，用于 GPU 支持)

@@ -1,3 +1,171 @@
-FROM deepseek_base
-COPY . /app
-CMD ["python3", "-m", "backend_server.fastapi_main_server"]
+# =============================================================================
+# DeepSeek V4 Service Image Dockerfile
+# =============================================================================
+# 服务镜像：在基础镜像之上安装应用代码和依赖
+# 用于运行 API 服务和 WebUI 服务
+
+# -----------------------------------------------------------------------------
+# 阶段 1：依赖安装
+# -----------------------------------------------------------------------------
+# 多阶段构建的第一阶段，安装 Python 依赖
+FROM python:3.10-slim AS requirements
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建 requirements 文件
+# 注意：在实际构建时，需要将 requirements.txt 放到构建上下文中
+COPY requirements.txt /tmp/requirements.txt
+
+# 预下载依赖层（加速构建）
+RUN pip install --no-cache-dir -r /tmp/requirements.txt || \
+    # 如果 requirements.txt 不存在，安装基础依赖
+    pip install --no-cache-dir \
+        fastapi==0.109.0 \
+        uvicorn[standard]==0.27.0 \
+        pydantic==2.5.3 \
+        httpx==0.26.0 \
+        redis==5.0.1 \
+        sqlalchemy==2.0.25 \
+        pymysql==1.1.0 \
+        python-jose[cryptography]==3.3.0 \
+        passlib[bcrypt]==1.7.4 \
+        python-multipart==0.0.6 \
+        aiofiles==23.2.1 \
+        python-dotenv==1.0.0
+
+# -----------------------------------------------------------------------------
+# 阶段 2：构建应用镜像
+# -----------------------------------------------------------------------------
+FROM deepseek_v4_base:latest
+
+# 镜像元数据
+LABEL maintainer="DeepSeek Team" \
+      version="1.0.0" \
+      description="DeepSeek V4 Service Image"
+
+# 构建参数
+ARG APP_USER=deepseek
+ARG APP_HOME=/app
+ARG SERVICE_NAME=deepseek-api
+
+# 环境变量
+ENV SERVICE_NAME=${SERVICE_NAME} \
+    APP_HOME=${APP_HOME} \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    # FastAPI/Uvicorn 配置
+    UVICORN_WORKERS=1 \
+    UVICORN_HOST=0.0.0.0 \
+    UVICORN_PORT=8000 \
+    # 日志配置
+    LOG_LEVEL=info \
+    LOG_FORMAT=json
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # 网络监控
+    curl \
+    # 进程管理
+    supervisor \
+    # 日志工具
+    dumb-init \
+    # 时区
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# 复制 Python 依赖
+COPY --from=requirements /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=requirements /usr/local/bin /usr/local/bin
+
+# 创建应用目录结构
+RUN mkdir -p ${APP_HOME}/backend \
+    && mkdir -p ${APP_HOME}/frontend \
+    && mkdir -p ${APP_HOME}/config \
+    && mkdir -p ${APP_HOME}/logs \
+    && mkdir -p ${APP_HOME}/data \
+    && mkdir -p ${APP_HOME}/models \
+    && mkdir -p ${APP_HOME}/cache \
+    && mkdir -p ${APP_HOME}/scripts \
+    && mkdir -p /var/log/supervisor
+
+# 复制应用代码
+# 注意：构建时需要将项目代码放到 build_context 中
+COPY --chown=${APP_USER}:${APP_USER} ./backend ${APP_HOME}/backend
+COPY --chown=${APP_USER}:${APP_USER} ./config ${APP_HOME}/config
+
+# 复制脚本
+COPY --chown=${APP_USER}:${APP_USER} ./scripts/*.sh ${APP_HOME}/scripts/
+RUN chmod +x ${APP_HOME}/scripts/*.sh
+
+# 复制配置文件
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# 创建 .env 文件模板（运行时覆盖）
+RUN if [ ! -f ${APP_HOME}/.env ]; then \
+    cat > ${APP_HOME}/.env.template << 'EOF'
+# DeepSeek V4 环境配置
+# ========================
+
+# 服务配置
+SERVICE_NAME=deepseek-api
+SERVICE_PORT=8000
+LOG_LEVEL=info
+
+# 数据库配置
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DATABASE=deepseek
+MYSQL_USER=deepseek
+MYSQL_PASSWORD=changeme
+
+# Redis 配置
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
+
+# JWT 配置
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# API 配置
+API_PREFIX=/api/v1
+API_RATE_LIMIT=100
+API_TIMEOUT=300
+
+# 模型配置
+MODEL_PATH=/app/models
+MODEL_MAX_LENGTH=4096
+MODEL_BATCH_SIZE=8
+
+# CORS 配置
+CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+EOF
+    cp ${APP_HOME}/.env.template ${APP_HOME}/.env
+    fi
+
+# 设置权限
+RUN chmod 600 ${APP_HOME}/.env* \
+    && chmod +x ${APP_HOME}/scripts/*.sh
+
+# 健康检查配置
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${UVICORN_PORT:-8000}/health || exit 1
+
+# 暴露端口
+EXPOSE 8000
+
+# 使用 dumb-init 作为 PID 1，避免僵尸进程
+ENTRYPOINT ["dumb-init", "--"]
+
+# 默认启动命令（可通过 docker-compose 覆盖）
+CMD ["python3", "-m", "uvicorn", "backend_server.fastapi_main_server:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1"]
