@@ -1,7 +1,110 @@
-torch>=2.0
-pillow
-transformers
-datasets
-fastapi
-uvicorn
-streamlit
+# DeepSeek V4 Complete - 依赖包列表
+# Core Dependencies
+torch>=2.0.0
+numpy>=1.24.0
+transformers>=4.30.0
+datasets>=2.14.0
+
+# Data Processing
+pillow>=10.0.0
+opencv-python>=4.8.0
+torchaudio>=2.0.0
+librosa>=0.10.0
+
+# Training
+deepspeed>=0.11.0
+accelerate>=0.25.0
+tensorboard>=2.14.0
+
+# Tokenizer & Encoding
+regex>=2023.0.0
+sentencepiece>=0.1.99
+
+# API Server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+starlette>=0.27.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+websockets>=12.0
+
+# Database
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+redis>=5.0.0
+faiss-cpu>=1.7.4
+faiss-gpu>=1.7.4
+
+# Vector Database (optional)
+pymilvus>=2.3.0
+chromadb>=0.4.0
+
+# Frontend
+streamlit>=1.28.0
+gradio>=4.0.0
+
+# Monitoring & Logging
+psutil>=5.9.0
+pynvml>=11.5.0
+prometheus-client>=0.19.0
+grafana-api>=1.0.0
+
+# Security
+cryptography>=41.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Utilities
+pyyaml>=6.0.0
+tqdm>=4.66.0
+click>=8.1.0
+rich>=13.0.0
+python-dotenv>=1.0.0
+
+# Search Enhancement
+requests>=2.31.0
+duckduckgo-search>=4.0.0
+
+# Code Execution
+jupyter-client>=8.4.0
+simpleeval>=2023.0.0
+
+# Email & Notifications
+aiosmtplib>=3.0.0
+python-json-logger>=2.0.0
+
+# Testing & Evaluation
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0
+
+# Optional: High Performance Inference
+vllm>=0.2.0
+tensorrt>=9.0.0
+onnxruntime-gpu>=1.16.0
+
+# Optional: Distributed Training
+torchrun>=0.0.0
+torch-distributed>=0.0.0
+
+# Optional: Model Optimization
+optimum>=1.12.0
+onnx>=1.15.0
+
+# Optional: Image Processing
+torchvision>=0.15.0
+diffusers>=0.25.0
+transformers[torch]>=4.30.0
+
+# Optional: Audio Processing
+soundfile>=0.12.0
+
+# Development
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.5.0
+isort>=5.12.0
+
+# Documentation
+mkdocs>=1.5.0
+mkdocstrings>=0.23.0
