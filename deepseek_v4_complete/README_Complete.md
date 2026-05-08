@@ -42,16 +42,28 @@ deepseek_v4_complete/
 │   ├── pretrain_train.py    # 预训练脚本
 │   └── deepspeed_cfg/       # DeepSpeed配置
 │       └── ds_zero3.json
-├── human_alignment/         # 人类对齐
-├── omega_alignment/         # Omega对齐
+├── omega_alignment/         # Omega对齐（DeepSeek V4核心创新）
+│   ├── __init__.py
+│   └── omega_sampler.py     # 自适应对齐采样器
 ├── multimodal_system/       # 多模态系统
+│   ├── __init__.py
+│   └── multimodal_processor.py # 图像/音频处理器
+├── high_perf_infer/         # 高性能推理
+│   ├── __init__.py
+│   └── inference_engine.py  # 推理引擎（支持TensorRT）
+├── backend_server/          # 后端服务
+│   ├── __init__.py
+│   └── api_server.py        # FastAPI API服务
+├── conversation_memory/     # 对话记忆
+│   ├── __init__.py
+│   └── memory_manager.py    # 长短期记忆管理
+├── safe_guard_system/       # 安全防护系统
+│   ├── __init__.py
+│   └── safety_filter.py     # 内容安全过滤
+├── human_alignment/         # 人类对齐
 ├── intelligent_agent/       # 智能代理
 ├── search_enhance/          # 搜索增强
-├── conversation_memory/     # 对话记忆
-├── high_perf_infer/         # 高性能推理
-├── safe_guard_system/       # 安全防护系统
 ├── model_evaluation/        # 模型评估
-├── backend_server/          # 后端服务
 ├── frontend_webui/          # 前端WebUI
 ├── database_storage/        # 数据库存储
 ├── operation_monitor/       # 运维监控
@@ -89,6 +101,16 @@ deepseek_v4_complete/
 - **数据增强**（同义词替换、随机删除等）
 - **多格式支持**（JSON/JSONL/TXT/CSV/YAML/XML）
 
+### Omega Alignment（DeepSeek V4核心创新）
+- **自适应注意力采样**
+- **动态上下文长度调整**
+- **智能信息检索**
+
+### 安全防护
+- **内容安全过滤**（有毒内容、仇恨言论、暴力等）
+- **Prompt注入检测**
+- **隐私信息保护**
+
 ## 安装依赖
 
 ```bash
@@ -124,6 +146,49 @@ deepspeed --num_gpus=8 train_system/pretrain_train.py \
     --deepspeed_config train_system/deepspeed_cfg/ds_zero3.json
 ```
 
+## 推理
+
+```python
+from high_perf_infer import InferenceEngine, GenerateConfig
+from tokenizer import DeepSeekTokenizer
+
+tokenizer = DeepSeekTokenizer('vocab.json')
+engine = InferenceEngine(model, tokenizer, device='cuda')
+
+config = GenerateConfig(
+    max_new_tokens=512,
+    temperature=0.7,
+    top_p=0.9
+)
+
+response = engine.chat([
+    {'role': 'user', 'content': 'Hello, how are you?'}
+], config)
+```
+
+## API服务
+
+```bash
+python -c "
+from backend_server import APIServer
+from high_perf_infer import InferenceEngine
+
+engine = InferenceEngine(model, tokenizer)
+server = APIServer(engine, host='0.0.0.0', port=8000)
+server.run()
+"
+```
+
+### API端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/v1/chat/completions` | POST | 对话补全 |
+| `/v1/completions` | POST | 文本补全 |
+| `/v1/models` | GET | 模型列表 |
+| `/health` | GET | 健康检查 |
+| `/metrics` | GET | 指标统计 |
+
 ## 模块说明
 
 ### Tokenizer
@@ -138,6 +203,30 @@ deepspeed --num_gpus=8 train_system/pretrain_train.py \
 - **SampleBuilder**: 训练样本构建（预训练、QA、对话等）
 - **DataAugmenter**: 数据增强（同义词替换、随机插入等）
 - **StreamingDataset**: 流式数据集加载
+
+### Omega Alignment
+- **OmegaSampler**: 自适应注意力采样器
+- **OmegaAligner**: Omega对齐模块
+- **AdaptiveOmegaLoss**: 自适应损失函数
+
+### Multimodal System
+- **ImageProcessor**: 图像预处理
+- **VisionEncoder**: 视觉编码器
+- **MultimodalProjector**: 多模态投影层
+- **MultimodalTokenizer**: 多模态Tokenizer
+
+### Inference Engine
+- **InferenceEngine**: 通用推理引擎
+- **TensorRTInferenceEngine**: TensorRT加速推理
+
+### Conversation Memory
+- **ConversationMemory**: 会话级记忆
+- **LongTermMemory**: 长期记忆存储
+- **MemoryAugmenter**: 记忆增强提示
+
+### Safety Filter
+- **SafetyFilter**: 安全过滤
+- **ContentModeration**: 内容审核
 
 ## 配置参数
 
