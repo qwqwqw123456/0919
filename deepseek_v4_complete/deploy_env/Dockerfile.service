@@ -1,0 +1,3 @@
+FROM deepseek_base
+COPY . /app
+CMD ["python3", "-m", "backend_server.fastapi_main_server"]
