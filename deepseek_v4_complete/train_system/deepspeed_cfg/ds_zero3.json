@@ -1,0 +1,1 @@
+{"train_batch_size": "auto", "gradient_accumulation_steps": "auto", "zero_optimization": {"stage": 3}}
