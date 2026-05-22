@@ -1,3 +1,5 @@
+import os
+from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple, Optional
 from collections import defaultdict
 from .code_analyzer import ModuleInfo, ClassInfo
@@ -120,7 +122,3 @@ class DependencyExtractor:
         
         visited.discard(module_name)
         return visited
-
-
-from dataclasses import dataclass
-import os

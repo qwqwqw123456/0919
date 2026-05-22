@@ -1,0 +1,68 @@
+```mermaid
+classDiagram
+    class SearchAnswerMerge {
+        +merge(self, question, search_results, answer)
+    }
+    class ResultFilter {
+        +filter(self, results)
+    }
+    class SearchResult {
+        +title
+        +url
+        +snippet
+        +source
+        +score
+        +published_date
+        +author
+        +language
+        +metadata
+        +__post_init__(self)
+        +to_dict(self): Dict
+        +is_valid(self): bool
+    }
+    class SearchResponse {
+        +query
+        +results
+        +total_results
+        +page
+        +per_page
+        +response_time
+        +error
+        +cached
+        +__post_init__(self)
+        +to_dict(self): Dict
+        +filter_valid_results(self): Constant(value='SearchResponse', kind=None)
+    }
+    class BaseSearchEngine {
+        +ENGINE_NAME
+        +DEFAULT_MAX_RESULTS
+        +MAX_RETRY_ATTEMPTS
+        +REQUEST_TIMEOUT
+        +__init__(self, timeout, max_retries, default_language, enable_cache, rate_limit_delay)
+        +_execute_search(self, query, max_results): List
+        +_parse_result(self, raw_result): SearchResult
+        +_normalize_query(self, query): str
+        +_rate_limit(self)
+        +_get_from_cache(self, cache_key): Optional
+        +_save_to_cache(self, cache_key, response)
+        +_create_cache_key(self, query, max_results): str
+        +search(self, query, max_results, page, language): SearchResponse
+        +_execute_search_with_retry(self, query, max_results, page, language): List
+        +get_engine_info(self): Dict
+        +clear_cache(self)
+        +validate_url(self, url): bool
+    }
+    ABC <|-- BaseSearchEngine
+    class SearchEngineRegistry {
+        +_engines
+        +_default_engine
+        +register(cls, name, engine, set_default)
+        +get(cls, name): Optional
+        +get_default(cls): Optional
+        +list_engines(cls): List
+        +unregister(cls, name)
+    }
+    class SearchEngineFactory {
+        +create(engine_type): BaseSearchEngine
+    }
+```
