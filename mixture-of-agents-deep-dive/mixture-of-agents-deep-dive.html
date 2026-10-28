@@ -296,7 +296,7 @@ sup a:hover{text-decoration:underline}
       y<sub>i</sub> = ⊕<sub>j=1..n</sub> A<sub>i,j</sub>(x<sub>i</sub>) &nbsp;+&nbsp; x<sub>1</sub><br>
       x<sub>i+1</sub> = y<sub>i</sub>
     </div>
-    <p>其中 ⊕ 表示把 n 份输出按顺序拼接，<em>x<sub>1</sub></em> 是原始提示。<strong>每一层的每个智能体都会同时看到“上一层全部输出”和“原始提示”</strong>——后者是防止多轮改写导致意图漂移的关键设计。最后一层只保留一个模型直接输出<sup><a href="#cite-3">[3]</a></sup>。</p>
+    <p>其中 ⊕ 表示把 n 份输出按顺序拼接，<em>x<sub>1</sub></em> 是原始提示。<strong>每一层的每个智能体都会同时看到“上一层全部输出”和“原始提示”</strong>——后者是防止多轮改写导致意图漂移的关键设计。最后一层只保留一个模型直接输出<sup><a href="#cite-3">[3]</a></sup><sup><a href="#cite-4">[4]</a></sup>。</p>
 
     <figure class="svg-figure">
       <svg viewBox="0 0 900 500" role="img" aria-label="Mixture-of-Agents 三层结构示意图">
@@ -385,7 +385,7 @@ sup a:hover{text-decoration:underline}
 
     <p>三点值得注意：</p>
     <ul>
-      <li><strong>AlpacaEval 上 MoA 领先 GPT-4o 7.6 个百分点</strong>，但同一个 MoA 在 Arena-Hard 上落后 1.8 个百分点；<em>MoA 只有在把 GPT-4o 放进末层聚合时</em>才在 Arena-Hard 反超到 90.3%<sup><a href="#cite-3">[3]</a></sup>。这说明“开源模型集体超越闭源前沿”的说法被过度泛化了。</li>
+      <li><strong>AlpacaEval 上 MoA 领先 GPT-4o 7.6 个百分点</strong>，但同一个 MoA 在 Arena-Hard（更接近真实偏好的对抗式评测）上落后 1.8 个百分点<sup><a href="#cite-13">[13]</a></sup>；<em>MoA 只有在把 GPT-4o 放进末层聚合时</em>才在 Arena-Hard 反超到 90.3%<sup><a href="#cite-3">[3]</a></sup>。这说明“开源模型集体超越闭源前沿”的说法被过度泛化了。</li>
       <li><strong>MT-Bench 已接近饱和。</strong>MoA 9.25、GPT-4o 9.19、GPT-4 Turbo 9.31——差距落在噪声区间，且 GPT-4 Turbo 反而更高。用 MT-Bench 论证 MoA 的优势信息量很低<sup><a href="#cite-3">[3]</a></sup><sup><a href="#cite-12">[12]</a></sup>。</li>
       <li><strong>FLASK 的唯一退步维度是简洁性（conciseness）</strong>，其余维度普遍提升<sup><a href="#cite-3">[3]</a></sup>。这一细节与“输出更长”的怀疑方向一致。</li>
     </ul>
@@ -438,6 +438,8 @@ sup a:hover{text-decoration:underline}
         <p class="tl-desc">把 MoA 做成对外的“多模型审议”能力，明确声明仅执行单层以避免递归，面板模型数限制在 1–8 个<sup><a href="#cite-21">[21]</a></sup><sup><a href="#cite-22">[22]</a></sup>。</p>
       </div>
     </div>
+
+    <p>同一时期还有一条相反的结构路线：Chain of Agents 把长上下文任务拆给多个 worker 串行处理、由 manager 汇总，用<strong>顺序传递</strong>替代并行广播<sup><a href="#cite-17">[17]</a></sup>。它说明“多智能体协作”并不必然指向 MoA 的全连接并行拓扑——拓扑本身是一个可优化的设计变量。</p>
 
     <h3>Self-MoA 到底证明了什么</h3>
     <p>Self-MoA 的结论常被简化为“异构混合没用”，这是误读。更准确的表述是：<strong>当 proposer 池中存在明显弱于最强者的模型时，异构混合的收益会被拉低</strong>。论文用 Vendi Score 度量输出多样性后发现，MoA 的性能对 proposer 平均质量的敏感度远高于对多样性的敏感度，最优点落在“高质量、较低多样性”的角落<sup><a href="#cite-6">[6]</a></sup>。反转条件包括：proposer 质量相近但专长互补时，异构仍略优；聚合方式由“综合”切换为“评判/选择”时，异构的优势会显著放大。</p>
@@ -544,7 +546,7 @@ flowchart TD
     <p>把 MoA 做成产品，实际出现了三种截然不同的形态。它们都不是论文配置的直接复刻。</p>
 
     <h3>形态一：托管审议服务（MoA 作为产品本身）</h3>
-    <p>OpenRouter Fusion 于 2026-06-13 发布，把一次请求变成“小规模多模型审议”：多个面板模型并行作答（可带联网检索），一个裁判模型对比后产出结构化分析——共识、矛盾、覆盖不足、独特洞见、盲区——最终答案由外层模型据此写出<sup><a href="#cite-21">[21]</a></sup>。工程上做了三处关键收敛：<strong>只做单层</strong>（避免递归放大）、<strong>面板数量上限 1–8</strong>、<strong>按底层各次调用累加计费且无额外溢价</strong><sup><a href="#cite-22">[22]</a></sup>。</p>
+    <p>OpenRouter Fusion 于 2026-06-13 发布，把一次请求变成“小规模多模型审议”：多个面板模型并行作答（可带联网检索），一个裁判模型对比后产出结构化分析——共识、矛盾、覆盖不足、独特洞见、盲区——最终答案由外层模型据此写出<sup><a href="#cite-21">[21]</a></sup><sup><a href="#cite-23">[23]</a></sup>。工程上做了三处关键收敛：<strong>只做单层</strong>（避免递归放大）、<strong>面板数量上限 1–8</strong>、<strong>按底层各次调用累加计费且无额外溢价</strong><sup><a href="#cite-22">[22]</a></sup>。</p>
     <p>消费级产品 moa.chat 采用更轻的形式：Pro 档每月 29 美元，用三个前沿模型并行互审后综合；Max 档 49 美元，换取更深推理<sup><a href="#cite-24">[24]</a></sup>。这类产品的共同点是<strong>把“价格不透明”转化为“定价简单”</strong>——用户按订阅付费，供应商承担模型调用波动。</p>
 
     <h3>形态二：把 MoA 蒸馏回单模型（最被低估的路径）</h3>
