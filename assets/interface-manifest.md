@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 42 个 Python 文件 / 6984 行；测试 23 个文件、127 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
+> 实跑基线：`src/` 下 43 个 Python 文件 / 7167 行；测试 24 个文件、134 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 1（`system.status`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -30,6 +30,7 @@
 | `builtin` 脚本 | `sources/script.py` | 代码即动作：Python / bash 非交互执行 | 可配（默认 L1） | `run_python` / `run_shell`；CPU 上限可选 RLIMIT_CPU；支持会话级取消 |
 | `skill` 技能 | `sources/skill.py` | `skills/<name>/SKILL.md`；可执行技能注册为工具，知识技能按需阅读 | 技能 frontmatter 声明，缺省 L1 | 入口限定在技能目录内；参数以 JSON 从 stdin 传入 |
 | `knowledge` 知识 | `sources/knowledge.py` | 长文档分块检索与回写 | search L0 / add L1 | 与短期记忆分工：知识记长文档，记忆记短事实/偏好/经验；文档可归属七个知识域之一 |
+| `system` 系统 | `sources/system.py` | 只读运行环境指标（CPU/内存/磁盘/进程 RSS） | status L0 | 标准库采集，不依赖 shell 与宿主桥；供规划判断资源可行性 |
 | `native` 原生 | `sources/native.py` | 宿主 `/capabilities` 清单动态发现 | 清单声明，否则按名称关键词推断 | 桥不可用时返回空；桥存在但清单为空且 `fallback=true` 时挂浏览器/桌面兜底目录 |
 | `browser` 浏览器 | `sources/browser.py` | 兜底工具目录（9 个） | 只读 L0 / 可逆 L1 | 仅在原生通道走兜底目录时注册；实际执行交宿主桥 |
 | `desktop` 桌面 | `sources/desktop.py` | 兜底工具目录（8 个） | 只读 L0 / 可逆 L1 | 同上 |
@@ -48,6 +49,7 @@
 | `script.run_shell` | builtin | L1 | `command:str`，可选 `cwd`、`timeout` | 执行非交互 bash 命令 |
 | `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4` | 通道内走异步 `asearch`；有 `embed`/`aembed` 时切余弦向量，异步 embedding 失败自动退回关键词 + 字符 bigram 混合检索；分块向量按文本 sha1 缓存 |
 | `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块；兼容 `content`/`body`、`name`/`heading` 别名，缺字段时错误信息回显实际收到的字段；域归属留空，由 CLI/API 显式指定 |
+| `system.status` | system | L0 | 可选 `path:str`（磁盘用量目录，默认工作区） | 返回 CPU 核数、内存总量/可用、本进程 RSS、磁盘用量；结构化指标在 `meta.metrics`；非 Linux 内存项标注不可读 |
 | `skill.read` | skill | L0 | `name:str` | 阅读指定技能完整说明与资源清单（渐进式加载） |
 | `skill.text-stats` | skill | L0 | 见技能 `input_schema` | 示例可执行技能，入口 `skills/text-stats/main.py`，统计字符/中文/词/行/高频词 |
 | `skill.pre-write-check` | skill | L0 | `text:str` | 写操作前 D/S/P/A 风险扫描（删除/发送/付费/权限迁移），切句 + 否定紧邻豁免；命中输出 `VERDICT=block`，shell 入口 `skills/pre-write-check/check.sh`，退出码恒 0、结果看文本 |

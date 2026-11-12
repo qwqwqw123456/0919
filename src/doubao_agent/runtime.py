@@ -32,6 +32,7 @@ from .sources import (
     NativeSource,
     ScriptSource,
     SkillSource,
+    SystemSource,
 )
 from .sources.mcp import DEFAULT_HOST_MCP_URL, probe_http_mcp
 from .types import Risk
@@ -137,6 +138,7 @@ class Runtime:
 
         knowledge = KnowledgeStore(config.db_path, aembed=aembed)
         registry.add_source(KnowledgeSource(knowledge))
+        registry.add_source(SystemSource(config.workspace))
 
         await registry.refresh()
 

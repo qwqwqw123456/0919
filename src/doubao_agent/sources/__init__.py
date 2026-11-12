@@ -8,6 +8,7 @@ from .mcp import MCPSource
 from .native import NativeSource
 from .script import ScriptSource
 from .skill import SkillSource
+from .system import SystemSource
 
 __all__ = [
     "ApiSource",
@@ -20,6 +21,7 @@ __all__ = [
     "ScriptSource",
     "SkillSource",
     "SourceError",
+    "SystemSource",
     "browser_specs",
     "desktop_specs",
 ]
