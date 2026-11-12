@@ -19,18 +19,24 @@ scheduler_interval: 30
 max_steps: 12
 port: 8765
 
+# 真模型推理：云电脑当前没有暴露 model.complete 桥，也没有 API key。
+# 平台开放桥（注入 AGENT_BRIDGE_URL）后改回 provider: host；
+# 或提供 OpenAI 兼容 endpoint + key 时按 agent.example.yaml 的注释配置。
 model:
-  provider: host
-  capability: model.complete
-  temperature: 0.2
+  provider: mock
 
 bridge:
-  enabled: true
-  # 宿主桥地址由豆包云电脑注入 AGENT_BRIDGE_URL（18080 是本机 HTTP 代理，不是桥）。
+  # 云电脑现状：能力走 MCP + RSA 签名 REST，推理走上层，
+  # 没有这套通用 REST 宿主桥。等平台开放或注入 AGENT_BRIDGE_URL 再启用。
+  enabled: false
   url: ""
   token: ""
   capabilities_path: /capabilities
   fallback: true
 
+# 云电脑的能力入口是标准 MCP（8091/mcp），平台侧可达时取消注释即可接入。
 mcp_servers: []
+#  - name: host
+#    transport: http
+#    url: http://127.0.0.1:8091/mcp
 api_sources: []

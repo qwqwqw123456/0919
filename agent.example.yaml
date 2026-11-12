@@ -23,7 +23,8 @@ scheduler_interval: 30         # 调度轮询间隔（秒）
 max_steps: 12
 port: 8765
 
-# 模型供给：豆包 App 云电脑里没有 API key，模型推理由宿主提供，走 bridge。
+# 模型供给：豆包 App 云电脑当前既没有 API key，也没有暴露 model.complete 桥。
+# 平台开放桥后可用 provider: host；否则本地跑用 mock（确定性桩，不产生真实推理）。
 model:
   provider: host                 # host | openai | mock
   capability: model.complete     # 宿主暴露的推理能力名
@@ -37,13 +38,14 @@ model:
   # model: doubao-1-5-pro-32k
   # temperature: 0.2
 
-# 豆包宿主原生能力桥：自动发现全部原生能力（浏览器/桌面/通知/剪贴板/媒体/模型推理…）。
+# 通用 REST 宿主桥（目标形态，非当前云电脑现状）：
+# 云电脑现状是“能力走 MCP + RSA 签名 REST，推理走上层”，没有这套端点。
+# 平台开放后由环境变量注入：AGENT_BRIDGE_URL（地址，注入后自动启用）、AGENT_BRIDGE_TOKEN（鉴权）。
 # 契约：GET {url}/capabilities 返回 {capabilities:[{name,description,input_schema,risk}]}；
 #       POST {url}/invoke，body {capability,payload}，Authorization: Bearer {token}。
-# 运行时由环境变量注入：AGENT_BRIDGE_URL（地址，注入后自动启用）、AGENT_BRIDGE_TOKEN（鉴权）。
 # 注意 18080 是云电脑的 HTTP 代理，不是桥；url 留空时不建桥，模型退回本地 mock，不影响运行。
 bridge:
-  enabled: true
+  enabled: false
   url: ""
   token: ""
   capabilities_path: /capabilities
@@ -54,6 +56,10 @@ mcp_servers:
     transport: stdio
     command: npx
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  # 云电脑能力入口是标准 MCP（8091/mcp），平台侧可达时启用：
+  # - name: host
+  #   transport: http
+  #   url: http://127.0.0.1:8091/mcp
   # - name: remote
   #   transport: http
   #   url: https://example.com/mcp
