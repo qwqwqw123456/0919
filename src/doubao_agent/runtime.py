@@ -137,7 +137,7 @@ class Runtime:
         scheduler = ScheduleStore(config.db_path)
         audit = AuditLog(config.runs_dir)
         provider = build_provider(config.model, bridge)
-        usage = UsageMeter()
+        usage = UsageMeter(max_calls=config.max_calls, max_tokens=config.max_tokens)
         agent = Agent(
             registry=registry,
             provider=provider,
@@ -153,6 +153,7 @@ class Runtime:
             context_limit=config.context_limit,
             cancel_event=cancel_event,
             working=working,
+            repair_rounds=config.repair_rounds,
         )
         return cls(
             config=config,
@@ -210,6 +211,7 @@ class Runtime:
             context_limit=self.config.context_limit,
             cancel_event=asyncio.Event(),
             working=self.working,
+            repair_rounds=self.config.repair_rounds,
         )
 
     def running_sessions(self) -> list[str]:

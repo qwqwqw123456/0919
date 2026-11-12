@@ -71,6 +71,7 @@ class Agent:
         context_limit: int = 40,
         cancel_event: asyncio.Event | None = None,
         working: WorkingMemory | None = None,
+        repair_rounds: int = 1,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -85,6 +86,7 @@ class Agent:
         self.usage = usage or UsageMeter()
         self.context_limit = context_limit
         self.working = working
+        self.repair_rounds = repair_rounds
         self.cancel_event = cancel_event or asyncio.Event()
         # 会话级产物清单：只扫本会话目录，按路径去重，不做 mtime 缓存（避免同一时间片内漏扫）。
         self._artifact_seen: dict[str, set[str]] = {}
@@ -233,6 +235,23 @@ class Agent:
                     "usage": self.usage.snapshot(),
                 }
             step += 1
+            budget = self.usage.exceeded()
+            if budget:
+                answer = budget
+                self.sessions.finish(session_id, answer, "incomplete")
+                self.audit.append(
+                    session_id, "finish", step=step - 1, answer=answer, budget=True,
+                    usage=self.usage.snapshot(),
+                )
+                self._consolidate(task, answer, "incomplete", step - 1, session_id, None)
+                await self._emit(on_event, {"type": "finish", "session": session_id, "answer": answer})
+                return {
+                    "session_id": session_id,
+                    "status": "incomplete",
+                    "answer": answer,
+                    "steps": step - 1,
+                    "usage": self.usage.snapshot(),
+                }
             reply = await self._complete(messages, tools)
             content = reply.get("content")
             tool_calls = reply.get("tool_calls") or []
@@ -391,6 +410,14 @@ class Agent:
                 )
                 steps.append({"tool": tool, "arguments": arguments, "ok": result.ok})
                 if not result.ok:
+                    repaired = await self._repair_call(
+                        task, tool, arguments, result.error or "", session_id
+                    )
+                    if repaired is not None and repaired.ok:
+                        steps[-1]["ok"] = True
+                        steps[-1]["repaired"] = True
+                        answers.append(repaired.content)
+                        continue
                     ok = False
                     answers.append(f"第 {index} 步 {tool} 失败：{result.error}")
                     break
@@ -416,6 +443,63 @@ class Agent:
             "planned": True,
             "usage": self.usage.snapshot(),
         }
+
+    async def _repair_call(
+        self,
+        task: str,
+        tool: str,
+        arguments: dict[str, Any],
+        error: str,
+        session_id: str,
+    ) -> ToolResult | None:
+        """工具失败后让模型修正参数并重试，最多 repair_rounds 轮；不改用其它工具。"""
+        rounds = max(0, self.repair_rounds)
+        if rounds == 0 or self.cancel_event.is_set():
+            return None
+        tools = [
+            item
+            for item in self.registry.openai_tools()
+            if (item.get("function") or {}).get("name") == tool
+        ]
+        if not tools:
+            return None
+        messages = [
+            {
+                "role": "system",
+                "content": "你负责修正工具调用。只输出一个函数调用，参数必须符合给定 schema，不要解释。",
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"任务：{task}\n工具：{tool}\n"
+                    f"本次参数：{json.dumps(arguments, ensure_ascii=False)}\n"
+                    f"失败原因：{error}\n请修正参数并重新调用 {tool}。"
+                ),
+            },
+        ]
+        for _ in range(rounds):
+            if self.cancel_event.is_set() or self.usage.exceeded():
+                return None
+            reply = await self._complete(messages, tools)
+            calls = reply.get("tool_calls") or []
+            if not calls:
+                return None
+            chosen = next((c for c in calls if c.get("name") == tool), calls[0])
+            result = await self._execute(
+                chosen.get("name") or tool,
+                chosen.get("arguments") or {},
+                "repair_1",
+                session_id,
+            )
+            if result.ok:
+                return result
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"仍然失败：{result.error}\n请再次修正 {tool} 的参数。",
+                }
+            )
+        return None
 
     async def _execute(
         self, tool_name: str, arguments: dict[str, Any], call_id: str, session_id: str

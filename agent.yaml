@@ -17,6 +17,9 @@ context_limit: 40
 scheduler_enabled: true
 scheduler_interval: 30
 max_steps: 12
+max_calls: 0        # 单次运行模型调用预算，0=不限
+max_tokens: 0       # 单次运行 token 预算，0=不限
+repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数
 port: 8765
 auth_token: ""
 

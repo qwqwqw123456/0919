@@ -21,6 +21,9 @@ context_limit: 40              # 单次请求最多携带的消息条数（超�
 scheduler_enabled: true        # 控制台/守护进程轮询 cron 定时任务
 scheduler_interval: 30         # 调度轮询间隔（秒）
 max_steps: 12
+max_calls: 0        # 单次运行模型调用预算，0=不限；接真实模型时建议设上限
+max_tokens: 0       # 单次运行 token 预算，0=不限
+repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数（0=不重试）
 port: 8765
 auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
                                  # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可
