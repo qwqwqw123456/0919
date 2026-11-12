@@ -16,6 +16,7 @@ from .planner import Plan, Planner
 from .recipe import RecipeStore
 from .session import SessionStore
 from .usage import UsageMeter
+from .working import WorkingMemory
 
 SYSTEM_PROMPT = """你是运行在豆包云电脑上的通用 AI Agent。
 
@@ -69,6 +70,7 @@ class Agent:
         usage: UsageMeter | None = None,
         context_limit: int = 40,
         cancel_event: asyncio.Event | None = None,
+        working: WorkingMemory | None = None,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -82,6 +84,7 @@ class Agent:
         self.planner = planner
         self.usage = usage or UsageMeter()
         self.context_limit = context_limit
+        self.working = working
         self.cancel_event = cancel_event or asyncio.Event()
         # 会话级产物清单与目录扫描缓存：目录 mtime 未变时复用上次结果。
         self._artifact_seen: dict[str, set[str]] = {}
@@ -114,6 +117,9 @@ class Agent:
         recalled = [item for item in self.memory.recall(task, limit=8) if item["id"] not in seen]
 
         sections: list[str] = []
+        working_text = self.working.context_text() if self.working is not None else ""
+        if working_text:
+            sections.append(working_text)
         if preferences:
             lines = "\n".join(f"- {item['text']}" for item in preferences)
             sections.append(f"用户长期偏好（优先遵守）：\n{lines}")
@@ -153,6 +159,26 @@ class Agent:
             self.audit.append(session_id, "memory_write", count=len(ids), ids=ids)
 
     async def run(
+        self,
+        task: str,
+        session_id: str | None = None,
+        on_event: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
+        """会话入口：先读工作记忆再开口，结束时回写状态。"""
+        if self.working is not None:
+            self.working.begin_session(task)
+        status = "failed"
+        summary = ""
+        try:
+            result = await self._run(task, session_id, on_event)
+            status = str(result.get("status") or "completed")
+            summary = str(result.get("answer") or "")
+            return result
+        finally:
+            if self.working is not None:
+                self.working.end_session(status, summary)
+
+    async def _run(
         self,
         task: str,
         session_id: str | None = None,

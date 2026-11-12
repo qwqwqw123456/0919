@@ -10,6 +10,7 @@ from .core.agent import Agent
 from .core.audit import AuditLog
 from .core.coordinator import Coordinator
 from .core.knowledge import KnowledgeStore
+from .core.longterm import LongTermMemory
 from .core.memory import MemoryStore
 from .core.permissions import Approver, PermissionPolicy
 from .core.planner import Planner
@@ -17,6 +18,7 @@ from .core.recipe import RecipeStore
 from .core.scheduler import ScheduleStore
 from .core.session import SessionStore
 from .core.usage import UsageMeter
+from .core.working import WorkingMemory
 from .providers import ModelProvider, build_provider
 from .providers.embedding import BridgeEmbedding
 from .registry import CapabilityRegistry
@@ -42,6 +44,8 @@ class Runtime:
     agent: Agent
     sessions: SessionStore
     memory: MemoryStore
+    working: WorkingMemory
+    longterm: LongTermMemory
     knowledge: KnowledgeStore
     recipes: RecipeStore
     skills: SkillManager
@@ -127,6 +131,8 @@ class Runtime:
         policy = PermissionPolicy(config.permission_mode, approver, config.auto_approve)
         sessions = SessionStore(config.db_path)
         memory = MemoryStore(config.db_path)
+        working = WorkingMemory(config.db_path)
+        longterm = LongTermMemory(config.db_path)
         recipes = RecipeStore(config.db_path)
         scheduler = ScheduleStore(config.db_path)
         audit = AuditLog(config.runs_dir)
@@ -146,6 +152,7 @@ class Runtime:
             usage=usage,
             context_limit=config.context_limit,
             cancel_event=cancel_event,
+            working=working,
         )
         return cls(
             config=config,
@@ -154,6 +161,8 @@ class Runtime:
             agent=agent,
             sessions=sessions,
             memory=memory,
+            working=working,
+            longterm=longterm,
             knowledge=knowledge,
             recipes=recipes,
             skills=skills,
@@ -166,6 +175,8 @@ class Runtime:
         await self.provider.aclose()
         self.sessions.close()
         self.memory.close()
+        self.working.close()
+        self.longterm.close()
         self.knowledge.close()
         self.recipes.close()
         self.scheduler.close()
@@ -198,6 +209,7 @@ class Runtime:
             usage=self.usage,
             context_limit=self.config.context_limit,
             cancel_event=asyncio.Event(),
+            working=self.working,
         )
 
     def running_sessions(self) -> list[str]:

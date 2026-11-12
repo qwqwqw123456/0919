@@ -10,7 +10,8 @@ def _write_config(tmp_path) -> str:
     cfg_path = tmp_path / "agent.yaml"
     cfg_path.write_text(
         f"workspace: {tmp_path}\nruns_dir: {tmp_path / 'runs'}\n"
-        f"db_path: {tmp_path / '.agent' / 'agent.db'}\nport: 8766\n",
+        f"db_path: {tmp_path / '.agent' / 'agent.db'}\nport: 8766\n"
+        "mcp_auto_discover: false\nscheduler_enabled: false\n",
         encoding="utf-8",
     )
     return str(cfg_path)
@@ -48,3 +49,61 @@ def test_cli_audit_sessions(tmp_path, capsys) -> None:
 
     assert main(["--config", cfg_path, "audit", "sessions"]) == 0
     assert "abc" in capsys.readouterr().out
+
+
+def test_cli_state_show_and_set(tmp_path, capsys) -> None:
+    cfg_path = _write_config(tmp_path)
+    assert main(["--config", cfg_path, "state", "show"]) == 0
+    assert "焦点线" in capsys.readouterr().out
+
+    assert main(["--config", cfg_path, "state", "set", "焦点线", "整理记忆体系"]) == 0
+    assert main(["--config", cfg_path, "state", "show"]) == 0
+    assert "整理记忆体系" in capsys.readouterr().out
+
+
+def test_cli_longterm_add_and_list(tmp_path, capsys) -> None:
+    cfg_path = _write_config(tmp_path)
+    assert (
+        main(
+            [
+                "--config",
+                cfg_path,
+                "longterm",
+                "deviation",
+                "add",
+                "--expected",
+                "10",
+                "--actual",
+                "7",
+                "--cause",
+                "估算偏乐观",
+            ]
+        )
+        == 0
+    )
+    assert main(["--config", cfg_path, "longterm", "deviation", "list"]) == 0
+    assert "+3" in capsys.readouterr().out
+
+
+def test_cli_knowledge_domains(tmp_path, capsys) -> None:
+    cfg_path = _write_config(tmp_path)
+    assert (
+        main(
+            [
+                "--config",
+                cfg_path,
+                "knowledge",
+                "add",
+                "--title",
+                "复盘",
+                "--text",
+                "发布前演练回滚",
+                "--domain",
+                "02",
+            ]
+        )
+        == 0
+    )
+    assert main(["--config", cfg_path, "knowledge", "domains"]) == 0
+    out = capsys.readouterr().out
+    assert "02 自我成长" in out and "1 篇" in out

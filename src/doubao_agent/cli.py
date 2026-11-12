@@ -244,6 +244,82 @@ async def _schedule_command(runtime: Runtime, args: argparse.Namespace) -> int:
     return 2
 
 
+def _state_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    working = runtime.working
+    if args.action == "show":
+        for key, value in working.load().items():
+            if key == "写入锁":
+                continue
+            print(f"{key}\t{value}")
+        return 0
+    if not args.key or args.value is None:
+        print("用法: state set <字段> <值>", file=sys.stderr)
+        return 2
+    value: Any = args.value
+    if args.key == "会话计数":
+        try:
+            value = int(args.value)
+        except ValueError:
+            print("会话计数必须是整数", file=sys.stderr)
+            return 2
+    try:
+        working.update(**{args.key: value})
+    except (ValueError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"已更新 {args.key}")
+    return 0
+
+
+def _longterm_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    store = runtime.longterm
+    if args.kind == "stats":
+        print(" · ".join(f"{name} {count}" for name, count in store.stats().items()))
+        return 0
+
+    if args.action == "add":
+        if args.kind == "lesson":
+            if not args.event:
+                print("用法: longterm lesson add --event 事件 [--judgment/--outcome/--lesson]", file=sys.stderr)
+                return 2
+            row_id = store.add_lesson(
+                args.event, args.judgment, args.outcome, args.lesson, args.date
+            )
+        elif args.kind == "observation":
+            if not args.phenomenon:
+                print("用法: longterm observation add --phenomenon 现象 [--observation/--cause/--followup]", file=sys.stderr)
+                return 2
+            row_id = store.add_observation(
+                args.phenomenon, args.observation, args.cause, args.followup, args.date
+            )
+        else:
+            if not args.expected or not args.actual:
+                print("用法: longterm deviation add --expected 值 --actual 值 [--gap/--cause/--fix]", file=sys.stderr)
+                return 2
+            row_id = store.add_deviation(
+                args.expected, args.actual, args.gap, args.cause, args.fix, args.date
+            )
+        print(f"已写入 #{row_id}")
+        return 0
+
+    rows = {
+        "lesson": store.lessons,
+        "observation": store.observations,
+        "deviation": store.deviations,
+    }[args.kind](args.limit)
+    if not rows:
+        print("（暂无记录）")
+        return 0
+    for row in rows:
+        parts = [
+            f"{key}={value}"
+            for key, value in row.items()
+            if key not in ("id", "date", "created_at") and value
+        ]
+        print(f"{row['date']}\t{' | '.join(parts)}")
+    return 0
+
+
 def _knowledge_command(runtime: Runtime, args: argparse.Namespace) -> int:
     store = runtime.knowledge
 
@@ -262,27 +338,39 @@ def _knowledge_command(runtime: Runtime, args: argparse.Namespace) -> int:
         print(f"文档 {stats['documents']} 篇 · 分块 {stats['chunks']} 个")
         return 0
 
+    if args.action == "domains":
+        for item in store.domain_stats():
+            print(f"{item['code']} {item['name']}\t{item['documents']} 篇")
+        return 0
+
     if args.action == "add":
         if args.title and args.text:
-            doc_id = store.add_text(args.title, args.text)
+            doc_id = store.add_text(args.title, args.text, domain=args.domain or "")
             print(f"已写入 #{doc_id}")
             return 0
         if not args.value:
             print("用法: knowledge add <文件路径>   或   knowledge add --title 标题 --text 正文", file=sys.stderr)
             return 2
         try:
-            doc_id = store.add_file(args.value)
+            doc_id = store.add_file(args.value, domain=args.domain or "")
         except (FileNotFoundError, OSError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         print(f"已导入 #{doc_id}")
         return 0
 
     if args.action == "search":
         if not args.value:
-            print("用法: knowledge search <问题或关键词>", file=sys.stderr)
+            print("用法: knowledge search <问题或关键词> [--domain 01]", file=sys.stderr)
             return 2
-        hits = store.search(args.value, limit=args.limit)
+        try:
+            hits = store.search(args.value, limit=args.limit, domain=args.domain)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         if not hits:
             print("没有找到相关内容")
             return 0
@@ -398,6 +486,12 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "knowledge":
             return _knowledge_command(runtime, args)
 
+        if args.cmd == "state":
+            return _state_command(runtime, args)
+
+        if args.cmd == "longterm":
+            return _longterm_command(runtime, args)
+
         if args.cmd == "parallel":
             return await _parallel_command(runtime, args)
 
@@ -453,12 +547,42 @@ def main(argv: list[str] | None = None) -> int:
     schedule_parser.add_argument("args", nargs="*", default=[])
     schedule_parser.add_argument("--name", default=None, help="任务名称（仅 add）")
 
-    knowledge_parser = sub.add_parser("knowledge", help="知识库：文档导入 / 检索 / 删除 / 统计")
-    knowledge_parser.add_argument("action", choices=["list", "add", "search", "remove", "stats"])
+    knowledge_parser = sub.add_parser(
+        "knowledge", help="知识库：文档导入 / 检索 / 删除 / 统计 / 七域索引"
+    )
+    knowledge_parser.add_argument(
+        "action", choices=["list", "add", "search", "remove", "stats", "domains"]
+    )
     knowledge_parser.add_argument("value", nargs="?", default=None)
     knowledge_parser.add_argument("--title", default=None, help="直接写入时的标题")
     knowledge_parser.add_argument("--text", default=None, help="直接写入时的正文")
+    knowledge_parser.add_argument("--domain", default=None, help="知识域：01~07 或域名称")
     knowledge_parser.add_argument("--limit", type=int, default=4, help="检索返回片段数")
+
+    state_parser = sub.add_parser("state", help="会话状态（工作记忆）：查看 / 修改")
+    state_parser.add_argument("action", choices=["show", "set"], nargs="?", default="show")
+    state_parser.add_argument("key", nargs="?", default=None, help="字段名，如 焦点线")
+    state_parser.add_argument("value", nargs="?", default=None, help="字段新值")
+
+    longterm_parser = sub.add_parser("longterm", help="长期记忆：萃取库 / 观察记录 / 偏差档案")
+    longterm_parser.add_argument(
+        "kind", choices=["lesson", "observation", "deviation", "stats"]
+    )
+    longterm_parser.add_argument("action", nargs="?", choices=["add", "list"], default="list")
+    longterm_parser.add_argument("--limit", type=int, default=10)
+    longterm_parser.add_argument("--date", default=None)
+    longterm_parser.add_argument("--event", default="")
+    longterm_parser.add_argument("--judgment", default="")
+    longterm_parser.add_argument("--outcome", default="")
+    longterm_parser.add_argument("--lesson", default="")
+    longterm_parser.add_argument("--phenomenon", default="")
+    longterm_parser.add_argument("--observation", default="")
+    longterm_parser.add_argument("--cause", default="")
+    longterm_parser.add_argument("--followup", default="")
+    longterm_parser.add_argument("--expected", default="")
+    longterm_parser.add_argument("--actual", default="")
+    longterm_parser.add_argument("--gap", default=None)
+    longterm_parser.add_argument("--fix", default="")
 
     parallel_parser = sub.add_parser("parallel", help="并行协同：拆解任务、并发执行子任务并汇总")
     parallel_parser.add_argument("task")

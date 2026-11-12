@@ -8,11 +8,37 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Sequence
 
+# 第三层：七个知识域（域索引），编号固定，名称可匹配。
+DOMAINS: dict[str, str] = {
+    "01": "认知与思维",
+    "02": "自我成长",
+    "03": "财富与商业",
+    "04": "人际与关系",
+    "05": "行业与赛道",
+    "06": "工具与参考",
+    "07": "国家政策",
+}
+
+
+def normalize_domain(value: str | None) -> str:
+    """把 '01' / '1' / '认知与思维' / '01 认知与思维' 归一成 '01'；空值放行。"""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    key = text[:2]
+    if key in DOMAINS:
+        return key
+    if text in DOMAINS.values():
+        return next(code for code, name in DOMAINS.items() if name == text)
+    raise ValueError(f"未知知识域：{text}（可用：{'、'.join(f'{k} {v}' for k, v in DOMAINS.items())}）")
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS chunks (
@@ -94,17 +120,27 @@ class KnowledgeStore:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
 
-    def add_text(self, title: str, text: str, source: str = "") -> int:
+    def _migrate(self) -> None:
+        """老库补 domain 列，避免升级后读写失败。"""
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(documents)")}
+        if "domain" not in columns:
+            self._conn.execute(
+                "ALTER TABLE documents ADD COLUMN domain TEXT NOT NULL DEFAULT ''"
+            )
+
+    def add_text(self, title: str, text: str, source: str = "", domain: str = "") -> int:
         clean = text.strip()
         if not clean:
             raise ValueError("knowledge text is empty")
+        code = normalize_domain(domain)
         now = time.time()
         with self._lock:
             cursor = self._conn.execute(
-                "INSERT INTO documents(title, source, created_at) VALUES (?, ?, ?)",
-                (title.strip() or "未命名", source, now),
+                "INSERT INTO documents(title, source, domain, created_at) VALUES (?, ?, ?, ?)",
+                (title.strip() or "未命名", source, code, now),
             )
             doc_id = int(cursor.lastrowid or 0)
             for idx, chunk in enumerate(_chunk_text(clean)):
@@ -115,18 +151,23 @@ class KnowledgeStore:
             self._conn.commit()
         return doc_id
 
-    def add_file(self, path: str | Path) -> int:
+    def add_file(self, path: str | Path, domain: str = "") -> int:
         p = Path(path)
         if not p.is_file():
             raise FileNotFoundError(str(p))
         title = p.stem
-        return self.add_text(title, p.read_text("utf-8", errors="replace"), source=str(p))
+        return self.add_text(
+            title, p.read_text("utf-8", errors="replace"), source=str(p), domain=domain
+        )
 
-    def search(self, query: str, limit: int = 4, per_doc: int = 2) -> list[dict[str, Any]]:
+    def search(
+        self, query: str, limit: int = 4, per_doc: int = 2, domain: str | None = None
+    ) -> list[dict[str, Any]]:
         query = query.strip()
         if not query:
             return []
-        rows = self._rows()
+        code = normalize_domain(domain)
+        rows = [row for row in self._rows() if not code or row["domain"] == code]
         if self.embed is not None:
             query_vec = self.embed(query)
             scored: list[tuple[float, sqlite3.Row]] = [
@@ -136,14 +177,17 @@ class KnowledgeStore:
             scored = [(_score_chunk(query, row["text"]), row) for row in rows]
         return self._pick(scored, limit, per_doc)
 
-    async def asearch(self, query: str, limit: int = 4, per_doc: int = 2) -> list[dict[str, Any]]:
+    async def asearch(
+        self, query: str, limit: int = 4, per_doc: int = 2, domain: str | None = None
+    ) -> list[dict[str, Any]]:
         """异步检索：优先用 aembed；宿主 embedding 不可用时退回关键词检索。"""
         query = query.strip()
         if not query:
             return []
         if self.aembed is None:
-            return self.search(query, limit=limit, per_doc=per_doc)
-        rows = self._rows()
+            return self.search(query, limit=limit, per_doc=per_doc, domain=domain)
+        code = normalize_domain(domain)
+        rows = [row for row in self._rows() if not code or row["domain"] == code]
         try:
             query_vec = await self.aembed(query)
             scored: list[tuple[float, sqlite3.Row]] = [
@@ -156,7 +200,7 @@ class KnowledgeStore:
     def _rows(self) -> list[sqlite3.Row]:
         with self._lock:
             return self._conn.execute(
-                "SELECT c.id, c.doc_id, c.idx, c.text, d.title, d.source "
+                "SELECT c.id, c.doc_id, c.idx, c.text, d.title, d.source, d.domain "
                 "FROM chunks c JOIN documents d ON d.id = c.doc_id"
             ).fetchall()
 
@@ -179,6 +223,7 @@ class KnowledgeStore:
                     "doc_id": int(row["doc_id"]),
                     "title": row["title"],
                     "source": row["source"],
+                    "domain": row["domain"],
                     "score": round(float(score), 4),
                     "text": row["text"],
                 }
@@ -222,7 +267,7 @@ class KnowledgeStore:
     def list_documents(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT d.id, d.title, d.source, d.created_at, COUNT(c.id) AS chunks "
+                "SELECT d.id, d.title, d.source, d.domain, d.created_at, COUNT(c.id) AS chunks "
                 "FROM documents d LEFT JOIN chunks c ON c.doc_id = d.id "
                 "GROUP BY d.id ORDER BY d.id DESC"
             ).fetchall()
@@ -231,9 +276,22 @@ class KnowledgeStore:
                 "id": int(row["id"]),
                 "title": row["title"],
                 "source": row["source"],
+                "domain": row["domain"],
                 "chunks": int(row["chunks"]),
             }
             for row in rows
+        ]
+
+    def domain_stats(self) -> list[dict[str, Any]]:
+        """七个知识域的文档数（域索引），空域也列出。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT domain, COUNT(*) AS documents FROM documents GROUP BY domain"
+            ).fetchall()
+        counts = {row["domain"]: int(row["documents"]) for row in rows}
+        return [
+            {"code": code, "name": name, "documents": counts.get(code, 0)}
+            for code, name in DOMAINS.items()
         ]
 
     def remove(self, doc_id: int) -> bool:
