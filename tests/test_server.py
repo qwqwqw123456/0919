@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from doubao_agent.config import Config
@@ -48,3 +50,47 @@ def test_run_endpoint_rejects_without_token(tmp_path) -> None:
     with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
         response = client.post("/api/run", json={"task": "查一下资料"})
         assert response.status_code == 401
+
+
+def _sign(token: str, body: bytes) -> str:
+    import hashlib
+    import hmac
+
+    return "sha256=" + hmac.new(token.encode(), body, hashlib.sha256).hexdigest()
+
+
+def test_webhook_open_when_no_token_configured(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        response = client.post("/api/webhook", json={"task": "整理今日记录", "event": "manual"})
+        assert response.status_code == 200
+        assert response.json()["status"] == "started"
+        assert response.json()["event"] == "manual"
+
+
+def test_webhook_rejects_without_token_or_signature(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
+        assert client.post("/api/webhook", json={"task": "任务"}).status_code == 401
+
+
+def test_webhook_accepts_valid_signature(tmp_path) -> None:
+    body = json.dumps({"task": "整理今日记录", "event": "push"}, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "X-Agent-Signature": _sign("s3cret", body),
+        "content-type": "application/json",
+    }
+    with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
+        response = client.post("/api/webhook", content=body, headers=headers)
+        assert response.status_code == 200
+        assert response.json()["event"] == "push"
+
+
+def test_webhook_rejects_bad_signature(tmp_path) -> None:
+    body = json.dumps({"task": "整理今日记录"}, ensure_ascii=False).encode("utf-8")
+    headers = {"X-Agent-Signature": "sha256=deadbeef", "content-type": "application/json"}
+    with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
+        assert client.post("/api/webhook", content=body, headers=headers).status_code == 401
+
+
+def test_webhook_requires_task(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        assert client.post("/api/webhook", json={"event": "x"}).status_code == 400

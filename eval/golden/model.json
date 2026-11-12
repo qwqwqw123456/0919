@@ -1,0 +1,11 @@
+{
+  "_comment": "端到端模型样例：需要真实 provider 才能判定，离线闸门默认跳过。include_model=true 时才跑。",
+  "cases": [
+    {
+      "id": "e2e-simple-answer",
+      "needs_model": true,
+      "task": "用一句话说明什么是向量检索",
+      "expect": {"contains": ["向量"]}
+    }
+  ]
+}

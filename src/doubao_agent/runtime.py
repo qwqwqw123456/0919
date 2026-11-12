@@ -148,6 +148,12 @@ class Runtime:
         scheduler = ScheduleStore(config.db_path)
         audit = AuditLog(config.runs_dir)
         provider = build_provider(config.model, bridge)
+        # 备用 provider 只在配置显式开启时启用：默认不降级，避免静默换模型糊弄用户
+        fallback = None
+        if (config.provider_fallback or "").strip().lower() == "mock":
+            from .providers.mock import MockProvider
+
+            fallback = MockProvider(script=None)
         usage = UsageMeter(max_calls=config.max_calls, max_tokens=config.max_tokens)
         agent = Agent(
             registry=registry,
@@ -165,6 +171,8 @@ class Runtime:
             cancel_event=cancel_event,
             working=working,
             repair_rounds=config.repair_rounds,
+            fallback_provider=fallback,
+            provider_retries=config.provider_retries,
         )
         return cls(
             config=config,

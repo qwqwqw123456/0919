@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 42 个 Python 文件 / 6772 行 / 20 测试文件 / 105 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 42 个 Python 文件 / 6984 行 / 23 测试文件 / 127 passed，分支 `feat/evolution-layer`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
@@ -8,25 +8,26 @@
 | 能力 | 现状证据 |
 | --- | --- |
 | 三层记忆 + 检索 | `working_state` / `lessons·observations·deviations` / `documents·chunks`；知识库同步+异步检索，向量失败退回关键词混合 |
-| 上下文截断 | `core/agent.py` `_trim_messages`：保留 system + 最近消息，对齐 user 边界 |
+| 上下文压缩 | `core/agent.py` `_trim_messages`：保留 system + 最近消息，对齐 user 边界；被裁早期 user 要点并入 system 注记 |
 | 调度 / 并行 / 续跑 / 重放 | `schedules` cron；`parallel` 子任务；检查点 + `resume`；配方 `replay` 零模型重放 |
 | 权限与审计 | 风险 L0–L3；`auto / guarded / manual`；审计追加式哈希链 JSONL，凭据字段递归脱敏 |
 | 预算与修正 | `max_calls` / `max_tokens` / `repair_rounds`；超限以 `incomplete` 收尾 |
 | 注入防护 | 工具/网页/文件输出用不可信头脚包裹，其中指令不得执行（`_UNTRUSTED_HEADER/FOOTER`） |
 | 守护自愈 | `daemon` 子进程退出按退避重启，SIGTERM 优雅收尾 |
 | 自进化 | `skill_usage` 用量台账、active→stale→archived 生命周期、pin 保护、配方蒸馏草案 |
-| 触发与并发 | 控制台 `POST /api/run`、`/api/parallel`、`/api/schedules` 可外部调起；全局 `Semaphore(3)` 并发闸 |
+| 触发与并发 | 控制台 `POST /api/run`、`/api/webhook`（令牌/HMAC 签名）、`/api/parallel`、`/api/schedules`；全局 `Semaphore(3)` 并发闸 |
+| 离线评估集 | `eval/golden/skills.json` 规则样例 + `eval/runner.py` 判定器，纳入 pytest 闸门；模型端到端样例占位 |
 | 多模态输入 | `run --image`（可重复，单张 ≤5MB，OpenAI `image_url`） |
 
 ## 2. 运行时缺口
 
 ### P0 — 决定能否长期无人值守且越用越稳
 
-| # | 缺口 | 现状证据 | 验收方向 |
-| --- | --- | --- | --- |
-| G1 | **事件驱动触发** | 现有 cron 定时 + 手动/API 调起；无文件变更监听，无入站 webhook 事件订阅与签名校验 | 能由文件变更 / 外部回调起任务；入站触发带鉴权或签名，不裸奔 |
-| G2 | **进化评估集** | 仅 pytest 单元测试；无面向任务成败的 golden / eval 集与回归闸门 | 沉淀一批标准任务样例与成败判定；技能/提示词迭代前先跑评估集，退化即拦截 |
-| G3 | **摘要式上下文压缩** | `_trim_messages` 是纯截断，早期结论直接丢弃；长任务后半段会忘前面口径 | 截断前把早期结论/决策沉淀进工作记忆或长期记忆，再按窗口裁剪 |
+| # | 缺口 | 现状证据 | 验收方向 | 状态 |
+| --- | --- | --- | --- | --- |
+| G1 | **事件驱动触发** | 已有 cron 定时 + 手动/API 调起；`POST /api/webhook` 支持令牌或 HMAC-SHA256 签名入站触发；仍无文件变更监听 | 文件变更 / 外部回调均可起任务；入站触发带鉴权或签名，不裸奔 | **部分落地**：webhook 验签触发已接入；文件监听待做 |
+| G2 | **进化评估集** | `eval/golden/skills.json` 离线样例 + `eval/runner.py` 判定器，纳入 pytest 闸门；模型端到端样例占位待接真实 provider | 沉淀标准任务样例与成败判定；技能/提示词迭代前先跑评估集，退化即拦截 | **骨架落地**：离线规则样例可跑；模型质量回归待接 provider |
+| G3 | **摘要式上下文压缩** | `_trim_messages` 原为纯截断；现已把被裁早期 user 要点并入 system 注记（工具/助手细节省略），多模态 parts 抽取文本 | 截断前把早期结论/决策沉淀进工作记忆或长期记忆，再按窗口裁剪 | **规则式落地**：早期要点保留；基于模型的结论摘要待做 |
 
 ### P1 — 安全与成本
 
@@ -34,7 +35,7 @@
 | --- | --- | --- | --- |
 | G4 | **凭据加密保管** | 密钥仅存 `.env.local`（600 权限）经环境变量注入；无 vault / keyring 加密存储，落盘为明文 | 凭据不入日志/产物；敏感落盘可加密，或明确由平台密钥保管注入 |
 | G5 | **工具结果缓存与细粒度限流** | 仅全局 `Semaphore(3)` 与知识库向量缓存；无工具结果缓存，无按通道/工具的限流与速率预算 | 幂等工具重复调用命中缓存；按通道设并发/速率上限，超限排队或拒绝而非压垮进程 |
-| G6 | **provider 异常兜底** | 主循环 `_complete` 外层未包异常；401 / 端点超时上抛，不回退 mock 或备用模型 | 模型端点失败按策略重试/降级到备用 provider 或 mock，并在结果中显式标注降级 |
+| G6 | **provider 异常兜底** | `_complete` 已按 `provider_retries` 重试（401/403/404 不重试）；配置 `provider_fallback=mock` 时主端点失败切备用 provider，结果带 `degraded` 标注；默认不降级 | 模型端点失败按策略重试/降级到备用 provider 或 mock，并在结果中显式标注降级 | **已落地**：重试 + 显式 mock 兜底 + 降级标注；备用真实 provider 通道待接 |
 
 ### P2 — 感知与协作
 
@@ -57,4 +58,4 @@
 
 ## 4. 建议优先级
 
-先做 **G1 事件触发 → G2 评估集 → G3 摘要压缩**：这三项直接决定无人值守闭环是否成立、自进化会不会退化、长任务会不会失忆。其次补 G4–G6 的安全与成本护栏；G7–G10 按宿主能力开放情况再排期。
+P0 三项已部分落地：G1 webhook 验签触发、G2 离线评估集骨架、G3 规则式早期要点 + 结论沉淀；G6 provider 重试与 mock 兜底已落地。剩余收尾：G1 文件变更监听、G2 接真实 provider 的模型质量回归、G3 基于模型的结论摘要、G6 备用真实 provider 通道。其次补 G4–G5 的凭据保管与缓存限流；G7–G10 按宿主能力开放情况再排期。

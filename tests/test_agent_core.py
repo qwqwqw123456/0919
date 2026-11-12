@@ -191,9 +191,39 @@ def test_trim_messages_keeps_system_and_user_boundary() -> None:
 
     trimmed = _trim_messages(messages, 8)
 
-    assert trimmed[0]["content"] == "sys"
+    assert trimmed[0]["content"].startswith("sys")
+    assert "早期要点" in trimmed[0]["content"]
     assert len(trimmed) <= 8
     assert trimmed[1]["role"] == "user"
+
+
+def test_trim_messages_preserves_early_user_points_in_system() -> None:
+    from doubao_agent.core.agent import _trim_messages
+
+    messages = [{"role": "system", "content": "sys"}]
+    messages.append({"role": "user", "content": "目标：统计季度销售额"})
+    messages.append({"role": "assistant", "content": "好的"})
+    messages.append({"role": "tool", "tool_call_id": "t0", "content": "敏感工具结果"})
+    for index in range(6):
+        messages.append({"role": "user", "content": f"补充 {index}"})
+        messages.append({"role": "assistant", "content": f"a{index}"})
+
+    trimmed = _trim_messages(messages, 6)
+
+    assert "目标：统计季度销售额" in trimmed[0]["content"]
+    assert "敏感工具结果" not in trimmed[0]["content"]
+    assert trimmed[1]["role"] == "user"
+
+
+def test_extract_text_handles_multimodal_parts() -> None:
+    from doubao_agent.core.agent import _extract_text
+
+    parts = [
+        {"type": "text", "text": "看这张图"},
+        {"type": "image_url", "image_url": {"url": "data:x"}},
+    ]
+    assert _extract_text(parts) == "看这张图"
+    assert _extract_text("纯文本") == "纯文本"
 
 
 async def test_usage_counts_model_calls(tmp_path) -> None:

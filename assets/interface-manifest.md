@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 42 个 Python 文件 / 6772 行；测试 20 个文件、105 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。
+> 实跑基线：`src/` 下 42 个 Python 文件 / 6984 行；测试 23 个文件、127 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -114,6 +114,7 @@
 | POST | `/api/sessions/{session_id}/resume` | 后台恢复会话 |
 | POST | `/api/sessions/{session_id}/cancel` | 请求取消指定会话 |
 | POST | `/api/run` | 后台执行任务（`task`） |
+| POST | `/api/webhook` | 入站事件触发（`task`，可选 `event`/`payload`）；令牌或 `X-Agent-Signature: sha256=<HMAC-SHA256>` 验签 |
 | POST | `/api/parallel` | 后台并行执行（`task`，可选 `subtasks`） |
 | GET | `/api/events` | SSE 事件流（见第 6 节） |
 | GET | `/api/schedules` | 定时任务列表 |
@@ -123,7 +124,7 @@
 | POST | `/api/schedules/{schedule_id}/run` | 立即执行一次 |
 | GET | `/` | 控制台静态页 `server/static/index.html` |
 
-鉴权：配置了 `auth_token`（或 `AGENT_AUTH_TOKEN`）时，中间件保护全部 `/api/*`；令牌可来自 `X-Agent-Token` 头、`Authorization: Bearer`、`?token=` 查询参数或 cookie。带 `?token=` 访问一次会种下 HttpOnly cookie。未配置令牌时不鉴权（仅限本机使用）。
+鉴权：配置了 `auth_token`（或 `AGENT_AUTH_TOKEN`）时，中间件保护全部 `/api/*`；令牌可来自 `X-Agent-Token` 头、`Authorization: Bearer`、`?token=` 查询参数或 cookie。带 `?token=` 访问一次会种下 HttpOnly cookie。未配置令牌时不鉴权（仅限本机使用）。`POST /api/webhook` 另支持 `X-Agent-Signature: sha256=<raw body 的 HMAC-SHA256 摘要>` 验签，带签名头的请求由端点校验、不经令牌中间件拦截。
 
 调度器：`_run_scheduler` 每轮扫描到期任务，为每个任务建独立 `asyncio.Task` 并发派发（`asyncio.Semaphore(3)` 限流）；`inflight` 集合去重，同一任务未结束不会被重复触发；执行结束才 `mark_ran`，服务关闭时取消所有未完成子任务。单个任务异常不影响调度循环。
 
@@ -230,16 +231,17 @@
 
 配置文件（`agent.yaml`，模板 `agent.example.yaml`）字段：
 
-`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
+`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`provider_retries`、`provider_fallback`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
 - `max_calls` / `max_tokens`：单次运行的模型调用数与 token 预算，`0` 表示不限；超限时任务以 `incomplete` 收尾并直接说明预算耗尽。
 - `repair_rounds`：工具失败后允许模型修正参数重试的轮数，`0` 表示不修正。
+- `provider_retries`：模型端点异常重试次数；401/403/404 不重试，直接进降级判断；`provider_fallback` 为 `"mock"` 时主端点失败切内置 mock 兜底并在结果标注 `degraded`，留空则不降级、异常上抛。
 - `evolution`：技能用量遥测与生命周期审计；`stale_days`（默认 14）未用算闲置，`archive_days`（默认 30）进归档，只改状态位不删文件；`pinned` 技能不参与自动流转。
 - `mcp_servers` 会与 `<db_path 所在目录>/mcp.local.yaml`（`mcp add/remove` 写入）合并，同名以 `agent.yaml` 为准。
 
 环境变量覆盖（前缀 `AGENT_*`）：
 
-`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_EVOLUTION`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
+`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_PROVIDER_RETRIES`、`AGENT_PROVIDER_FALLBACK`、`AGENT_EVOLUTION`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
 
 - `.env.local` 自动加载：`load_config()` 启动时读取当前目录与工作区的 `.env.local`，解析 `KEY=VALUE` 行（兼容剥离 `export ` 前缀，注释/空行跳过）；只补缺省变量，已存在的环境变量优先不覆盖；文件缺失或读取失败静默跳过，不引入 `python-dotenv` 依赖。
 

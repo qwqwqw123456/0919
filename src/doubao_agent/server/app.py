@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import time
@@ -8,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
@@ -27,6 +28,20 @@ def _tool_dict(spec: ToolSpec) -> dict[str, Any]:
         "source": spec.source,
         "schema": spec.input_schema,
     }
+
+
+def _verify_webhook_signature(token: str, body: bytes, header: str) -> bool:
+    """校验入站 webhook 签名（``X-Agent-Signature: sha256=<hexdigest>``）。
+
+    未带签名头表示不走签名，交由令牌中间件把关；带了签名头但未配令牌则无法验签。
+    """
+    if not header:
+        return True
+    if not token:
+        return False
+    expected = hmac.new(token.encode(), body, hashlib.sha256).hexdigest()
+    supplied = header.split("=", 1)[1].strip() if "=" in header else header.strip()
+    return hmac.compare_digest(expected, supplied)
 
 
 class EventBus:
@@ -141,7 +156,10 @@ def create_app(config: Config) -> FastAPI:
             or request.query_params.get("token", "")
             or request.cookies.get("agent_token", "")
         )
-        if not hmac.compare_digest(provided, auth_token):
+        # 带签名头的 webhook 交由端点做 HMAC 验签，不在中间件按令牌拦截。
+        if not provided and not request.headers.get("x-agent-signature"):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        if provided and not hmac.compare_digest(provided, auth_token):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         response = await call_next(request)
         if request.query_params.get("token"):
@@ -265,6 +283,38 @@ def create_app(config: Config) -> FastAPI:
 
         _spawn(_background())
         return {"session_id": session_id, "status": "started"}
+
+    @app.post("/api/webhook")
+    async def webhook(request: Request) -> dict[str, Any]:
+        """入站事件触发：外部系统带令牌或 HMAC 签名起一个任务。
+
+        body: ``{"task": "...", "event": "可选事件名", "payload": {...}}``。
+        签名头 ``X-Agent-Signature: sha256=<raw body 的 HMAC-SHA256 摘要>``。
+        """
+        runtime = rt()
+        body = await request.body()
+        try:
+            payload = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid JSON")
+        task = str((payload or {}).get("task", "")).strip()
+        if not task:
+            raise HTTPException(status_code=400, detail="task is required")
+        if not _verify_webhook_signature(auth_token, body, request.headers.get("x-agent-signature", "")):
+            raise HTTPException(status_code=401, detail="invalid signature")
+
+        session_id = runtime.sessions.create(task)
+        event = str((payload or {}).get("event", "")).strip()
+
+        async def _background() -> None:
+            try:
+                await runtime.start_run(task, session_id, on_event=bus.publish)
+            except Exception as exc:  # noqa: BLE001 - keep the console alive
+                runtime.sessions.finish(session_id, f"{type(exc).__name__}: {exc}", "failed")
+
+        _spawn(_background())
+        bus.publish({"type": "webhook_start", "session": session_id, "event": event})
+        return {"session_id": session_id, "status": "started", "event": event}
 
     @app.post("/api/parallel")
     async def parallel(payload: dict[str, Any]) -> dict[str, Any]:

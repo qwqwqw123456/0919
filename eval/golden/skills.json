@@ -1,0 +1,47 @@
+{
+  "_comment": "离线 golden 样例：不依赖模型，直接跑仓库内置可执行技能，断言输出片段。新增技能行为回归必须先在这里补样例。",
+  "cases": [
+    {
+      "id": "triage-light",
+      "skill": "task-triage",
+      "arguments": {"task": "把标题改成粗体"},
+      "expect": {"contains": ["L1-轻量"], "not_contains": ["L3-委派"]}
+    },
+    {
+      "id": "triage-standard",
+      "skill": "task-triage",
+      "arguments": {"task": "把这份报告整理成表格"},
+      "expect": {"contains": ["L2-标准"], "not_contains": ["L1-轻量"]}
+    },
+    {
+      "id": "triage-heavy",
+      "skill": "task-triage",
+      "arguments": {"task": "对比三家公司的产品、平台和模型，分别给出方案，哪个更好，为什么"},
+      "expect": {"contains": ["L3-委派"], "not_contains": ["L1-轻量"]}
+    },
+    {
+      "id": "prewrite-block-delete",
+      "skill": "pre-write-check",
+      "arguments": {"text": "删除旧目录 /tmp/old"},
+      "expect": {"contains": ["VERDICT=block", "D-删除"]}
+    },
+    {
+      "id": "prewrite-pass-negated",
+      "skill": "pre-write-check",
+      "arguments": {"text": "不要删除任何文件"},
+      "expect": {"contains": ["VERDICT=pass"], "not_contains": ["VERDICT=block"]}
+    },
+    {
+      "id": "prewrite-pass-readonly",
+      "skill": "pre-write-check",
+      "arguments": {"text": "读取一下 README 文件"},
+      "expect": {"contains": ["VERDICT=pass"]}
+    },
+    {
+      "id": "stats-basic",
+      "skill": "text-stats",
+      "arguments": {"text": "你好世界 hello"},
+      "expect": {"contains": ["\"chars\": 10", "\"cjk_chars\": 4", "\"words\": 2"]}
+    }
+  ]
+}

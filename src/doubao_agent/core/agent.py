@@ -5,6 +5,7 @@ import base64
 import inspect
 import json
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -43,20 +44,126 @@ def _wrap_tool_output(text: str) -> str:
     return f"{_UNTRUSTED_HEADER}\n{text}\n{_UNTRUSTED_FOOTER}"
 
 
-def _trim_messages(messages: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
-    """上下文压缩：保留 system 与最近消息，并对齐到 user 边界，避免工具结果与其请求分离。"""
+def _extract_text(content: Any) -> str:
+    """从消息 content 抽取纯文本；兼容多模态 parts 列表，图片部分忽略。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+_CONCLUSION_HINTS = ("结论", "决定", "定稿", "综上", "因此", "已完成", "结果是", "口径", "确认")
+
+_CONCLUSION_HEADER = "【早期结论（已压缩，工具细节已省略）】"
+
+
+def _conclusion_lines(message: dict[str, Any], limit: int = 2, width: int = 120) -> list[str]:
+    """从助手消息里挑出可能承载结论的句子。
+
+    只认含结论词的句子；一句都没有时退回首句，避免把工具细节当结论，
+    也避免早期决定在压缩后彻底消失。
+    """
+    if message.get("role") != "assistant":
+        return []
+    text = _extract_text(message.get("content")).strip()
+    if not text:
+        return []
+    sentences = [part.strip() for part in re.split(r"[。！？!?\n]", text) if part.strip()]
+    picked = [part for part in sentences if any(hint in part for hint in _CONCLUSION_HINTS)]
+    if not picked and sentences:
+        picked = [sentences[0]]
+    return [part[:width] for part in picked[:limit]]
+
+
+def _compact(
+    messages: list[dict[str, Any]], limit: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """上下文压缩：返回（裁剪后的消息, 被裁掉内容里值得沉淀的结论）。
+
+    行为与原先一致（保留 system 与最近消息、对齐 user 边界、早期 user 要点进 system 注记），
+    额外把被裁掉的助手结论抽出来，供调用方写入长期记忆，避免长任务后半段忘记早期口径。
+    """
     if limit <= 2 or len(messages) <= limit:
-        return messages
+        return messages, []
     system, rest = messages[0], messages[1:]
     keep = rest[-(limit - 1):]
     for index, message in enumerate(keep):
         if message.get("role") == "user":
             keep = keep[index:]
             break
-    return [system, *keep]
+    dropped = rest[:len(rest) - len(keep)]
+    early: list[str] = []
+    conclusions: list[str] = []
+    for message in dropped:
+        if message.get("role") == "user":
+            text = _extract_text(message.get("content")).strip()
+            if text:
+                early.append(text)
+        else:
+            conclusions.extend(_conclusion_lines(message))
+    system_message = dict(system)
+    notes: list[str] = []
+    if early:
+        notes.append("【早期要点（已压缩，工具细节已省略）】\n- " + "\n- ".join(dict.fromkeys(early)))
+    unique_conclusions = list(dict.fromkeys(conclusions))
+    if unique_conclusions:
+        notes.append(_CONCLUSION_HEADER + "\n- " + "\n- ".join(unique_conclusions))
+    if notes:
+        system_message["content"] = str(system.get("content") or "") + "\n\n" + "\n\n".join(notes)
+    return [system_message, *keep], unique_conclusions
+
+
+def _trim_messages(messages: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """兼容入口：只要裁剪后的消息，丢弃结论摘要。"""
+    return _compact(messages, limit)[0]
+
+
+def _persist_digest(memory: Any, digest: list[str]) -> int | None:
+    """把压缩掉的早期结论沉淀进长期记忆；空摘要或记忆不可用时不写。"""
+    if not digest or memory is None:
+        return None
+    body = "【早期结论沉淀】\n- " + "\n- ".join(digest)
+    try:
+        return memory.remember(
+            body, kind="experience", tags="context-compaction", source="agent-compaction"
+        )
+    except Exception:  # noqa: BLE001 - 记忆写失败不能拖垮主循环
+        return None
 
 
 _IMAGE_MAX_BYTES = 5 * 1024 * 1024
+
+# 端点级可重试状态码；401/403/404 这类重试也没用的直接进降级分支
+_RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _status_of(exc: Exception) -> int | None:
+    for attr in ("status_code", "status", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _describe(exc: Exception) -> str:
+    """降级原因要带状态码，否则用户只看到一句 endpoint failed 无从判断。"""
+    status = _status_of(exc)
+    prefix = f"status={status} " if status is not None else ""
+    return f"{prefix}{type(exc).__name__}: {exc}"
+
+
+def _retryable(exc: Exception) -> bool:
+    """有状态码时按状态码判定；无状态码的网络类异常按可重试处理。"""
+    status = _status_of(exc)
+    if status is None:
+        return True
+    return status in _RETRYABLE_STATUS
 
 
 def build_user_content(task: str, images: list[str] | None) -> Any:
@@ -93,6 +200,9 @@ class Agent:
         cancel_event: asyncio.Event | None = None,
         working: WorkingMemory | None = None,
         repair_rounds: int = 1,
+        fallback_provider: ModelProvider | None = None,
+        provider_retries: int = 1,
+        retry_delay: float = 0.2,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -109,6 +219,11 @@ class Agent:
         self.working = working
         self.repair_rounds = repair_rounds
         self.cancel_event = cancel_event or asyncio.Event()
+        # 端点兜底：默认不降级（不静默换模型），由配置显式开启备用 provider。
+        self.fallback_provider = fallback_provider
+        self.provider_retries = max(0, provider_retries)
+        self.retry_delay = max(0.0, retry_delay)
+        self.last_degraded: str | None = None
         # 会话级产物清单：只扫本会话目录，按路径去重，不做 mtime 缓存（避免同一时间片内漏扫）。
         self._artifact_seen: dict[str, set[str]] = {}
 
@@ -119,9 +234,35 @@ class Agent:
     async def _complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        reply = await self.provider.complete(_trim_messages(messages, self.context_limit), tools)
-        self.usage.record(reply.get("usage"))
-        return reply
+        trimmed, digest = _compact(messages, self.context_limit)
+        _persist_digest(self.memory, digest)
+        last_error: Exception | None = None
+        attempts = self.provider_retries + 1
+        for attempt in range(attempts):
+            try:
+                reply = await self.provider.complete(trimmed, tools)
+                self.usage.record(reply.get("usage"))
+                self.last_degraded = None
+                return reply
+            except Exception as exc:  # noqa: BLE001 - 端点异常在这里统一收敛
+                last_error = exc
+                if attempt + 1 >= attempts or not _retryable(exc):
+                    break
+                await asyncio.sleep(self.retry_delay * (attempt + 1))
+        if self.fallback_provider is not None:
+            try:
+                reply = await self.fallback_provider.complete(trimmed, tools)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"主备模型均不可用：{_describe(last_error)} / {_describe(exc)}"
+                ) from exc
+            self.usage.record(reply.get("usage"))
+            reason = _describe(last_error)
+            reply["degraded"] = reason
+            reply["degraded_provider"] = type(self.fallback_provider).__name__
+            self.last_degraded = reason
+            return reply
+        raise last_error if last_error else RuntimeError("provider 调用失败")
 
     async def _emit(self, callback: Callable[[dict[str, Any]], Any] | None, event: dict[str, Any]) -> None:
         if callback is None:
@@ -259,6 +400,11 @@ class Agent:
                     "usage": self.usage.snapshot(),
                 }
             step += 1
+            if self.last_degraded and reply.get("content"):
+                reply["content"] = (
+                    f"⚠️ 模型端点曾不可用（{self.last_degraded}），本次已切备用 provider，以下为降级答复：\n\n"
+                    + str(reply.get("content"))
+                )
             budget = self.usage.exceeded()
             if budget:
                 answer = budget
