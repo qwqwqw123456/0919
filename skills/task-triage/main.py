@@ -43,7 +43,8 @@ def intent_of(text: str) -> str:
 
 
 def delegation_of(text: str):
-    entities = len(re.findall(r"[一-鿿]{2,}(?:公司|产品|平台|模型|机构|人|仓库|系统)", text))
+    entities = len(re.findall(r"[一-鿿]{2,}(?:公司|产品|平台|模型|厂商|机构|人|仓库|系统)", text))
+    entities += len(re.findall(r"(?:一|两|三|四|五|几|多)\s*(?:家|个|款|种|台|套|条)", text))
     multi = len(re.findall(r"(和|与|、|及|还有|多个|多路|并行|分别)", text))
     questions = len(re.findall(r"(是否|能不能|怎么|如何|为什么|对比|比较|哪个|几)", text))
     if entities >= 3 or multi >= 3 or questions >= 4:
@@ -71,6 +72,11 @@ def main():
     if level == "L3-委派":
         weight = max(weight, 3)
     complexity = "重度" if weight >= 3 else ("标准" if weight == 2 else "轻量")
+    # 分级与复杂度对齐：复杂度是重/标准时不允许预算停在轻量档
+    floor = {"重度": "L3-委派", "标准": "L2-标准", "轻量": "L1-轻量"}[complexity]
+    order = {"L1-轻量": 0, "L2-标准": 1, "L3-委派": 2}
+    if order[floor] > order[level]:
+        level = floor
     est = {
         "重度": (">15 分钟", "≈15k+ tokens（内容多时按 ≤3 片分块）"),
         "标准": ("5–15 分钟", "≈5–10k tokens"),
