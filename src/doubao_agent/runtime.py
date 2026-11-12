@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+from dataclasses import dataclass
+from typing import Any
+
+from .config import Config
+from .core.agent import Agent
+from .core.audit import AuditLog
+from .core.coordinator import Coordinator
+from .core.knowledge import KnowledgeStore
+from .core.memory import MemoryStore
+from .core.permissions import Approver, PermissionPolicy
+from .core.planner import Planner
+from .core.recipe import RecipeStore
+from .core.scheduler import ScheduleStore
+from .core.session import SessionStore
+from .core.usage import UsageMeter
+from .providers import ModelProvider, build_provider
+from .registry import CapabilityRegistry
+from .skills import SkillManager
+from .sources import (
+    ApiSource,
+    HttpHostBridge,
+    KnowledgeSource,
+    MCPSource,
+    NativeSource,
+    ScriptSource,
+    SkillSource,
+)
+from .types import Risk
+
+
+@dataclass
+class Runtime:
+    config: Config
+    registry: CapabilityRegistry
+    provider: ModelProvider
+    agent: Agent
+    sessions: SessionStore
+    memory: MemoryStore
+    knowledge: KnowledgeStore
+    recipes: RecipeStore
+    skills: SkillManager
+    usage: UsageMeter
+    scheduler: ScheduleStore
+
+    @classmethod
+    async def build(cls, config: Config, approver: Approver | None = None) -> "Runtime":
+        registry = CapabilityRegistry()
+
+        for server in config.mcp_servers:
+            registry.add_source(MCPSource(server))
+
+        for api in config.api_sources:
+            try:
+                registry.add_source(ApiSource.from_file(api.name, api.spec_path))
+            except Exception as exc:  # noqa: BLE001 - report, keep other channels alive
+                print(f"[warn] api source '{api.name}' skipped: {exc}", file=sys.stderr)
+
+        bridge: Any = None
+        bridge_cfg = config.bridge or {}
+        if bridge_cfg.get("enabled") and bridge_cfg.get("url"):
+            bridge = HttpHostBridge(
+                bridge_cfg["url"],
+                bridge_cfg.get("token"),
+                capabilities_path=bridge_cfg.get("capabilities_path", "/capabilities"),
+            )
+        # All native capabilities (browser, desktop, notifications, clipboard,
+        # media, ...) come from one discovered manifest. No hardcoded list.
+        registry.add_source(NativeSource(bridge, fallback=bridge_cfg.get("fallback", True)))
+
+        try:
+            script_risk = Risk(config.script_risk)
+        except ValueError:
+            script_risk = Risk.REVERSIBLE
+        cancel_event = asyncio.Event()
+        registry.add_source(
+            ScriptSource(
+                config.workspace,
+                risk=script_risk,
+                max_cpu_seconds=config.script_max_cpu,
+                cancel_event=cancel_event,
+            )
+        )
+
+        skills = SkillManager(config.skills_dir)
+        skills.refresh()
+        if skills.list():
+            registry.add_source(SkillSource(skills))
+
+        knowledge = KnowledgeStore(config.db_path)
+        registry.add_source(KnowledgeSource(knowledge))
+
+        await registry.refresh()
+
+        policy = PermissionPolicy(config.permission_mode, approver)
+        sessions = SessionStore(config.db_path)
+        memory = MemoryStore(config.db_path)
+        recipes = RecipeStore(config.db_path)
+        scheduler = ScheduleStore(config.db_path)
+        audit = AuditLog(config.runs_dir)
+        provider = build_provider(config.model, bridge)
+        usage = UsageMeter()
+        agent = Agent(
+            registry=registry,
+            provider=provider,
+            policy=policy,
+            sessions=sessions,
+            audit=audit,
+            memory=memory,
+            max_steps=config.max_steps,
+            recipes=recipes,
+            record_recipes=config.record_recipes,
+            planner=Planner(provider, skills, usage) if config.planning_enabled else None,
+            usage=usage,
+            context_limit=config.context_limit,
+            cancel_event=cancel_event,
+        )
+        return cls(
+            config=config,
+            registry=registry,
+            provider=provider,
+            agent=agent,
+            sessions=sessions,
+            memory=memory,
+            knowledge=knowledge,
+            recipes=recipes,
+            skills=skills,
+            usage=usage,
+            scheduler=scheduler,
+        )
+
+    async def aclose(self) -> None:
+        await self.registry.aclose()
+        await self.provider.aclose()
+        self.sessions.close()
+        self.memory.close()
+        self.knowledge.close()
+        self.recipes.close()
+        self.scheduler.close()
+
+    def spawn_agent(self) -> Agent:
+        """创建一个独立 Agent 实例用于并行协同。
+
+        共享工具注册表、模型、权限策略、审计、记忆、配方与计量，仅取消信号独立，
+        因此子任务并发执行互不干扰，且成本计入同一份计量。
+        """
+        return Agent(
+            registry=self.registry,
+            provider=self.provider,
+            policy=self.agent.policy,
+            sessions=self.sessions,
+            audit=self.agent.audit,
+            memory=self.memory,
+            max_steps=self.config.max_steps,
+            recipes=self.recipes,
+            record_recipes=self.config.record_recipes,
+            planner=self.agent.planner,
+            usage=self.usage,
+            context_limit=self.config.context_limit,
+            cancel_event=asyncio.Event(),
+        )
+
+    def make_coordinator(self) -> Coordinator:
+        return Coordinator(self.spawn_agent, self.provider)

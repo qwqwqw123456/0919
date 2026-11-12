@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>豆包云电脑 · Agent 控制台</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #121722; --line: #1e2633; --text: #d7dde8;
+    --muted: #7c8798; --accent: #4f8cff; --ok: #38c172; --warn: #f0b429; --bad: #ef5b5b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.up { color: var(--ok); border-color: rgba(56,193,114,.4); }
+  .pill.down { color: var(--bad); border-color: rgba(239,91,91,.4); }
+  .spacer { flex: 1; }
+  form { display: flex; gap: 8px; }
+  input { background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 8px 12px; border-radius: 8px; width: 320px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  button { background: var(--accent); color: #fff; border: 0; padding: 8px 16px;
+    border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+  main { display: grid; grid-template-columns: 1.1fr .9fr 1.2fr; gap: 0; height: calc(100vh - 57px); }
+  section { border-right: 1px solid var(--line); overflow-y: auto; padding: 14px; }
+  section:last-child { border-right: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted);
+    margin: 4px 0 12px; font-weight: 600; }
+  .item { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+    background: var(--panel); cursor: pointer; }
+  .item:hover { border-color: #2c3a52; }
+  .item.active { border-color: var(--accent); }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .name { font-family: var(--mono); font-size: 12.5px; }
+  .desc { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.45;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { font-size: 10.5px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.L0 { color: var(--ok); } .tag.L1 { color: var(--accent); }
+  .tag.L2 { color: var(--warn); } .tag.L3 { color: var(--bad); }
+  .mono { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .log { font-family: var(--mono); font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .ev { padding: 6px 8px; border-left: 2px solid var(--line); margin-bottom: 6px; }
+  .ev.start { border-color: var(--accent); } .ev.finish { border-color: var(--ok); }
+  .ev.permission { border-color: var(--warn); } .ev.tool_call { border-color: #3d4a63; }
+  .empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
+  .status { font-size: 11px; padding: 1px 7px; border-radius: 4px; }
+  .completed { color: var(--ok); } .running { color: var(--accent); }
+  .incomplete, .failed { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>豆包云电脑 · Agent 控制台</h1>
+  <span id="health" class="pill">连接中</span>
+  <span id="summary" class="mono"></span>
+  <div class="spacer"></div>
+  <form id="runForm">
+    <input id="task" placeholder="输入任务，例如：整理 /workspace 下的文件清单" />
+    <button type="submit">执行</button>
+    <button type="button" class="ghost" id="refresh">刷新</button>
+  </form>
+</header>
+<main>
+  <section>
+    <h2>能力注册表 <span id="toolCount" class="mono"></span></h2>
+    <div id="tools"></div>
+  </section>
+  <section>
+    <h2>会话</h2>
+    <div id="sessions"></div>
+  </section>
+  <section>
+    <h2>审计回放 <span id="auditTitle" class="mono"></span></h2>
+    <div id="audit"><div class="empty">选择左侧会话查看执行轨迹</div></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null;
+
+async function getJSON(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function loadHealth() {
+  try {
+    const data = await getJSON('/api/health');
+    const bad = data.sources.filter(s => !s.ok);
+    $('health').textContent = bad.length ? `部分通道离线 (${bad.length})` : '通道正常';
+    $('health').className = 'pill ' + (bad.length ? 'down' : 'up');
+    const byKind = Object.entries(data.registry.by_kind).map(([k, v]) => `${k}:${v}`).join('  ');
+    $('summary').textContent = `工具 ${data.registry.tools}  |  ${byKind}`;
+  } catch (e) {
+    $('health').textContent = '离线';
+    $('health').className = 'pill down';
+  }
+}
+
+async function loadTools() {
+  const tools = await getJSON('/api/tools');
+  $('toolCount').textContent = `(${tools.length})`;
+  $('tools').innerHTML = tools.length ? tools.map(t => `
+    <div class="item">
+      <div class="row">
+        <span class="tag ${t.risk}">${t.risk}</span>
+        <span class="tag">${t.kind}</span>
+        <span class="name">${t.name}</span>
+      </div>
+      <div class="desc" title="${escapeAttr(t.description)}">${escapeHtml(t.description)}</div>
+    </div>`).join('') : '<div class="empty">暂无工具：检查 MCP / API / 宿主桥配置</div>';
+}
+
+async function loadSessions() {
+  const sessions = await getJSON('/api/sessions');
+  $('sessions').innerHTML = sessions.length ? sessions.map(s => `
+    <div class="item ${current === s.id ? 'active' : ''}" onclick="selectSession('${s.id}')">
+      <div class="row">
+        <span class="status ${s.status}">${s.status}</span>
+        <span class="mono">${s.id}</span>
+      </div>
+      <div class="desc">${escapeHtml(s.task)}</div>
+    </div>`).join('') : '<div class="empty">还没有会话</div>';
+}
+
+async function selectSession(id) {
+  current = id;
+  $('auditTitle').textContent = id;
+  await loadSessions();
+  const events = await getJSON(`/api/sessions/${id}/audit`);
+  $('audit').innerHTML = events.length ? events.map(e => {
+    const detail = e.event === 'tool_call'
+      ? `${e.tool} ${e.ok ? 'ok' : 'fail'} ${e.elapsed_ms || 0}ms${e.error ? ' · ' + e.error : ''}`
+      : e.event === 'permission'
+      ? `${e.tool} ${e.risk} · ${e.reason}`
+      : e.event === 'start' ? e.task
+      : e.answer || '';
+    return `<div class="ev ${e.event}"><span class="mono">${(e.ts || '').slice(11, 23)}</span>
+      <span class="tag">${e.event}</span> ${escapeHtml(String(detail || ''))}</div>`;
+  }).join('') : '<div class="empty">暂无记录</div>';
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+
+$('runForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const task = $('task').value.trim();
+  if (!task) return;
+  $('task').value = '';
+  await getJSON('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task }),
+  });
+  setTimeout(loadSessions, 300);
+});
+$('refresh').addEventListener('click', () => { loadHealth(); loadTools(); loadSessions(); });
+
+loadHealth(); loadTools(); loadSessions();
+setInterval(() => { loadHealth(); loadSessions(); }, 4000);
+</script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+workspace: /workspace
+runs_dir: /workspace/runs
+db_path: /workspace/.agent/agent.db
+permission_mode: guarded        # auto | guarded | manual
+script_risk: L1                 # 脚本通道风险：L1 直接执行，L2 起需确认
+script_max_cpu: 0               # 脚本 CPU 时间上限（秒），0 表示不限
+record_recipes: true            # 成功任务自动录制为配方，可零模型回放
+planning:
+  enabled: true                 # 每个任务只规划一次，执行阶段零推理；命中配方则 0 次
+skills_dir: /workspace/skills   # Skill 包目录，每个技能一个子目录 + SKILL.md
+context_limit: 40              # 单次请求最多携带的消息条数（超出按 user 边界裁剪）
+scheduler_enabled: true        # 控制台/守护进程轮询 cron 定时任务
+scheduler_interval: 30         # 调度轮询间隔（秒）
+max_steps: 12
+port: 8765
+
+# 模型供给：豆包 App 云电脑里没有 API key，模型推理由宿主提供，走 bridge。
+model:
+  provider: host                 # host | openai | mock
+  capability: model.complete     # 宿主暴露的推理能力名
+  model: ""                      # 可选：指定豆包模型名，留空用宿主默认
+  temperature: 0.2
+
+  # 若走外部 OpenAI 兼容接口（需要 key），改为下面这段：
+  # provider: openai
+  # base_url: https://ark.cn-beijing.volces.com/api/v3
+  # api_key_env: ARK_API_KEY
+  # model: doubao-1-5-pro-32k
+  # temperature: 0.2
+
+# 豆包宿主原生能力桥：自动发现全部原生能力（浏览器/桌面/通知/剪贴板/媒体/模型推理…）
+bridge:
+  enabled: false
+  url: http://127.0.0.1:18080/host
+  token: ""
+  capabilities_path: /capabilities   # 返回 {capabilities:[{name,description,input_schema,risk}]}
+  fallback: true                     # 宿主无清单时，退回内置浏览器/桌面工具集
+
+mcp_servers:
+  - name: filesystem
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+  # - name: remote
+  #   transport: http
+  #   url: https://example.com/mcp
+
+# 任意 HTTP 接口：填 OpenAPI 文档或声明式 JSON 路径
+api_sources: []
+#  - name: crm
+#    spec: /workspace/config/crm.openapi.json
