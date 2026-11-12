@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .config import Config
+from .config import Config, MCPServerConfig
 from .core.agent import Agent
 from .core.audit import AuditLog
 from .core.coordinator import Coordinator
@@ -30,6 +30,7 @@ from .sources import (
     ScriptSource,
     SkillSource,
 )
+from .sources.mcp import DEFAULT_HOST_MCP_URL, probe_http_mcp
 from .types import Risk
 
 
@@ -53,7 +54,19 @@ class Runtime:
     async def build(cls, config: Config, approver: Approver | None = None) -> "Runtime":
         registry = CapabilityRegistry()
 
-        for server in config.mcp_servers:
+        mcp_servers = list(config.mcp_servers)
+        if config.mcp_auto_discover and not mcp_servers:
+            if await probe_http_mcp():
+                mcp_servers.append(
+                    MCPServerConfig(name="host", transport="http", url=DEFAULT_HOST_MCP_URL)
+                )
+                print(f"[info] 已自动接入宿主 MCP：{DEFAULT_HOST_MCP_URL}")
+            else:
+                print(
+                    f"[info] 宿主 MCP {DEFAULT_HOST_MCP_URL} 暂不可达，跳过（相关能力暂缺）",
+                    file=sys.stderr,
+                )
+        for server in mcp_servers:
             registry.add_source(MCPSource(server))
 
         for api in config.api_sources:

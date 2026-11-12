@@ -34,7 +34,8 @@ bridge:
   capabilities_path: /capabilities
   fallback: true
 
-# 云电脑的能力入口是标准 MCP（8091/mcp），平台侧可达时取消注释即可接入。
+# 云电脑的能力入口是标准 MCP（8091/mcp）。这里留空时，启动会自动探测该端点：
+# 探测到就接入，探测不到就跳过（不报错、不影响其它通道）；可设 mcp_auto_discover: false 关闭。
 mcp_servers: []
 #  - name: host
 #    transport: http

@@ -52,6 +52,8 @@ bridge:
   fallback: true                     # 宿主无清单时，退回内置浏览器/桌面工具集
 
 mcp_servers:
+  # 未配置时启动会自动探测云电脑标准 MCP（127.0.0.1:8091/mcp），
+  # 探测不到就跳过、不影响其它通道；可用 mcp_auto_discover: false 关闭。
   - name: filesystem
     transport: stdio
     command: npx

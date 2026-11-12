@@ -5,10 +5,48 @@ import time
 from contextlib import AsyncExitStack
 from typing import Any
 
+import httpx
+
 from ..config import MCPServerConfig
 from ..types import SourceKind, ToolCall, ToolResult, ToolSpec
 from ..utils import dumps, infer_risk, jsonable
 from .base import SourceError
+
+# 云电脑的能力入口是标准 MCP（平台侧 8091 端口），启动时可自动探测。
+DEFAULT_HOST_MCP_URL = "http://127.0.0.1:8091/mcp"
+
+
+async def probe_http_mcp(
+    url: str = DEFAULT_HOST_MCP_URL,
+    timeout: float = 3.0,
+    client: httpx.AsyncClient | None = None,
+) -> bool:
+    """探测标准 MCP 端点：发一次 JSON-RPC initialize，拿到 result 才算可用。
+
+    探测失败只表示当前不可达，不代表配置有误；调用方应跳过而不是报错。
+    """
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "doubao-agent", "version": "0.1.0"},
+        },
+    }
+    headers = {"Accept": "application/json, text/event-stream"}
+    try:
+        if client is not None:
+            response = await client.post(url, json=payload, headers=headers)
+        else:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=True) as owner:
+                response = await owner.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+    except Exception:  # noqa: BLE001 - 探测是 best-effort
+        return False
+    return isinstance(data, dict) and isinstance(data.get("result"), dict)
 
 
 class MCPSource:

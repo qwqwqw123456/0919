@@ -62,6 +62,7 @@ class Config:
     embedding: dict[str, Any] = field(default_factory=dict)  # 宿主 embedding 能力，默认自动探测
     auto_approve: list[dict[str, Any]] = field(default_factory=list)  # 规则预授权，替代人工审批
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    mcp_auto_discover: bool = True    # 未配置 MCP 时，启动探测云电脑标准 MCP（8091）
     api_sources: list[ApiSourceConfig] = field(default_factory=list)
 
     def ensure_dirs(self) -> None:
@@ -143,6 +144,7 @@ def load_config(path: str | Path | None = None) -> Config:
             dict(item) for item in data.get("auto_approve", []) if isinstance(item, dict)
         ]
         cfg.mcp_servers = _parse_mcp(data.get("mcp_servers", []))
+        cfg.mcp_auto_discover = bool(data.get("mcp_auto_discover", cfg.mcp_auto_discover))
         cfg.api_sources = [
             ApiSourceConfig(name=str(i["name"]), spec_path=str(i["spec"]))
             for i in data.get("api_sources", [])
@@ -177,6 +179,13 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.bridge["enabled"] = True
     if os.environ.get("AGENT_BRIDGE_TOKEN"):
         cfg.bridge["token"] = os.environ["AGENT_BRIDGE_TOKEN"]
+    if os.environ.get("AGENT_MCP_AUTO_DISCOVER") is not None:
+        cfg.mcp_auto_discover = os.environ["AGENT_MCP_AUTO_DISCOVER"].lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
     if os.environ.get("AGENT_EMBEDDING_CAPABILITY"):
         cfg.embedding["capability"] = os.environ["AGENT_EMBEDDING_CAPABILITY"]
 
