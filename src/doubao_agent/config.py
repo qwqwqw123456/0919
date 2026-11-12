@@ -71,9 +71,11 @@ def _default_model() -> dict[str, Any]:
 def _parse_mcp(items: list[dict[str, Any]]) -> list[MCPServerConfig]:
     out = []
     for item in items or []:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
         out.append(
             MCPServerConfig(
-                name=item["name"],
+                name=str(item["name"]),
                 transport=item.get("transport", "stdio"),
                 command=item.get("command"),
                 args=list(item.get("args", [])),
@@ -113,8 +115,9 @@ def load_config(path: str | Path | None = None) -> Config:
         ]
         cfg.mcp_servers = _parse_mcp(data.get("mcp_servers", []))
         cfg.api_sources = [
-            ApiSourceConfig(name=i["name"], spec_path=i["spec"])
+            ApiSourceConfig(name=str(i["name"]), spec_path=str(i["spec"]))
             for i in data.get("api_sources", [])
+            if isinstance(i, dict) and i.get("name") and i.get("spec")
         ]
 
     # Environment overrides win, so the cloud desktop can inject config at runtime.

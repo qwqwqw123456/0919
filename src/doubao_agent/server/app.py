@@ -71,6 +71,13 @@ async def _run_scheduler(runtime: Runtime, bus: EventBus) -> None:
 def create_app(config: Config) -> FastAPI:
     state: dict[str, Runtime] = {}
     bus = EventBus()
+    # 持有后台任务强引用，避免事件循环在任务完成前将其回收。
+    _bg_tasks: set[asyncio.Task[Any]] = set()
+
+    def _spawn(coro: Any) -> None:
+        task = asyncio.create_task(coro)
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -82,6 +89,8 @@ def create_app(config: Config) -> FastAPI:
         try:
             yield
         finally:
+            for task in list(_bg_tasks):
+                task.cancel()
             if scheduler_task is not None:
                 scheduler_task.cancel()
             await runtime.aclose()
@@ -176,7 +185,7 @@ def create_app(config: Config) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 - keep the console alive
                 runtime.sessions.finish(session_id, f"{type(exc).__name__}: {exc}", "failed")
 
-        asyncio.create_task(_background())
+        _spawn(_background())
         return {"session_id": session_id, "status": "resuming"}
 
     @app.post("/api/sessions/{session_id}/cancel")
@@ -201,7 +210,7 @@ def create_app(config: Config) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 - keep the console alive
                 runtime.sessions.finish(session_id, f"{type(exc).__name__}: {exc}", "failed")
 
-        asyncio.create_task(_background())
+        _spawn(_background())
         return {"session_id": session_id, "status": "started"}
 
     @app.post("/api/parallel")
@@ -223,7 +232,7 @@ def create_app(config: Config) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 - keep the console alive
                 bus.publish({"type": "finish", "task": task, "answer": f"{type(exc).__name__}: {exc}"})
 
-        asyncio.create_task(_background())
+        _spawn(_background())
         return {"task": task, "status": "started"}
 
     @app.get("/api/events")
@@ -279,7 +288,7 @@ def create_app(config: Config) -> FastAPI:
         if schedule is None:
             raise HTTPException(status_code=404, detail="schedule not found")
         bus.publish({"type": "schedule_start", "id": schedule_id, "name": schedule["name"]})
-        asyncio.create_task(runtime.start_run(schedule["task"], on_event=bus.publish))
+        _spawn(runtime.start_run(schedule["task"], on_event=bus.publish))
         runtime.scheduler.mark_ran(schedule_id, now=time.time())
         return {"id": schedule_id, "status": "started"}
 

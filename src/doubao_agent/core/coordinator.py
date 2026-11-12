@@ -99,7 +99,22 @@ class Coordinator:
                 "session_id": result.get("session_id"),
             }
 
-        results = await asyncio.gather(*(_one(subtask) for subtask in subtasks))
+        gathered = await asyncio.gather(
+            *(_one(subtask) for subtask in subtasks), return_exceptions=True
+        )
+        results: list[dict[str, Any]] = []
+        for subtask, item in zip(subtasks, gathered):
+            if isinstance(item, Exception):
+                results.append(
+                    {
+                        "task": subtask,
+                        "status": "failed",
+                        "answer": f"{type(item).__name__}: {item}",
+                        "session_id": None,
+                    }
+                )
+            else:
+                results.append(item)
 
         ok_count = sum(1 for item in results if item["status"] == "completed")
         status = "completed" if ok_count == len(results) else ("incomplete" if ok_count else "failed")

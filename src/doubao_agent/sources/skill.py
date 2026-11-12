@@ -6,7 +6,6 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 from ..skills import Skill, SkillManager
 from ..types import Risk, SourceKind, ToolCall, ToolResult, ToolSpec
@@ -83,9 +82,9 @@ class SkillSource:
 
     async def _run(self, skill: Skill, call: ToolCall) -> ToolResult:
         started = time.perf_counter()
-        entry = Path(skill.entry or "")
-        entry_path = (skill.directory / entry).resolve()
-        if not entry_path.is_file():
+        root = skill.directory.resolve()
+        entry_path = (root / Path(skill.entry or "")).resolve()
+        if not entry_path.is_relative_to(root) or not entry_path.is_file():
             return ToolResult(
                 call_id=call.call_id, ok=False, error=f"skill entry not found: {skill.entry}"
             )

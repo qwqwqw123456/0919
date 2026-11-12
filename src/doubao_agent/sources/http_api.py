@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from ..types import Risk, SourceKind, ToolCall, ToolResult, ToolSpec
-from ..utils import dumps, infer_risk, jsonable
+from ..utils import dumps, infer_risk
 from .base import SourceError
 
 _METHODS = ("get", "post", "put", "patch", "delete")
@@ -133,7 +133,11 @@ class ApiSource:
 
     def _to_spec(self, ep: dict[str, Any]) -> ToolSpec:
         desc = ep.get("description") or f"{ep['method']} {ep['path']}"
-        risk = Risk(ep["risk"]) if ep.get("risk") else infer_risk(ep["name"], desc)
+        raw_risk = ep.get("risk")
+        try:
+            risk = Risk(str(raw_risk).upper()) if raw_risk else infer_risk(ep["name"], desc)
+        except ValueError:
+            risk = infer_risk(ep["name"], desc)
         return ToolSpec(
             name=ep["name"],
             description=desc,

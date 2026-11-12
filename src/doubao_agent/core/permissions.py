@@ -75,7 +75,10 @@ class PermissionPolicy:
         approver: Approver | None = None,
         rules: list[dict[str, Any] | PolicyRule] | None = None,
     ) -> None:
-        self.mode = PermissionMode(mode)
+        try:
+            self.mode = PermissionMode(mode)
+        except ValueError:
+            self.mode = PermissionMode.GUARDED
         self.approver = approver
         self.rules = [
             rule if isinstance(rule, PolicyRule) else PolicyRule.from_dict(rule)

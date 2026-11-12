@@ -42,7 +42,9 @@ class OpenAICompatProvider:
         response = await self._client.post("/chat/completions", json=payload)
         response.raise_for_status()
         body = response.json()
-        message = body["choices"][0]["message"]
+        choices = body.get("choices") or []
+        first = choices[0] if choices and isinstance(choices[0], dict) else {}
+        message = first.get("message") if isinstance(first.get("message"), dict) else {}
 
         tool_calls: list[dict[str, Any]] = []
         for call in message.get("tool_calls") or []:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from ..core.knowledge import KnowledgeStore
 from ..types import Risk, SourceKind, ToolCall, ToolResult, ToolSpec
 
