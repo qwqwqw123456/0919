@@ -178,3 +178,25 @@ async def test_cancel_session_is_scoped_to_target(tmp_path) -> None:
         assert agent_b.cancel_event.is_set() is True
     finally:
         await runtime.aclose()
+
+
+def test_gap_config_fields_parse(tmp_path) -> None:
+    from doubao_agent.config import load_config
+
+    cfg_file = tmp_path / "agent.yaml"
+    cfg_file.write_text(
+        """
+workspace: /tmp/ws
+tool_channel_concurrency: 5
+context_model_summary: true
+model_fallback:
+  provider: openai
+  base_url: https://backup.example/v1
+  model: backup-model
+""",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_file)
+    assert cfg.tool_channel_concurrency == 5
+    assert cfg.context_model_summary is True
+    assert cfg.model_fallback["model"] == "backup-model"

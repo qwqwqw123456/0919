@@ -19,13 +19,14 @@ def test_snapshot_filters_by_suffix(tmp_path: Path) -> None:
     assert str(tmp_path / "a.txt") in snap_txt
 
 
-def test_diff_snapshot_detects_created_and_modified() -> None:
-    prev = {"f1": 100.0, "f2": 200.0}
-    curr = {"f1": 100.0, "f2": 201.0, "f3": 300.0}
+def test_diff_snapshot_detects_created_modified_deleted() -> None:
+    prev = {"f1": 100.0, "f2": 200.0, "f3": 300.0}
+    curr = {"f1": 100.0, "f2": 201.0, "f4": 400.0}
     events = diff_snapshot(prev, curr)
     by_path = {e["path"]: e["event"] for e in events}
     assert by_path["f2"] == "modified"
-    assert by_path["f3"] == "created"
+    assert by_path["f4"] == "created"
+    assert by_path["f3"] == "deleted"
     assert "f1" not in by_path
 
 

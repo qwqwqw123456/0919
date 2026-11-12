@@ -60,7 +60,10 @@ class Runtime:
     @classmethod
     async def build(cls, config: Config, approver: Approver | None = None) -> "Runtime":
         cache_ttl = config.tool_cache_ttl if config.tool_cache_enabled else 0.0
-        registry = CapabilityRegistry(cache_ttl=cache_ttl)
+        registry = CapabilityRegistry(
+            cache_ttl=cache_ttl,
+            channel_concurrency=config.tool_channel_concurrency,
+        )
 
         mcp_servers = list(config.mcp_servers)
         if config.mcp_auto_discover and not mcp_servers:
@@ -151,12 +154,15 @@ class Runtime:
         scheduler = ScheduleStore(config.db_path)
         audit = AuditLog(config.runs_dir)
         provider = build_provider(config.model, bridge)
-        # 备用 provider 只在配置显式开启时启用：默认不降级，避免静默换模型糊弄用户
+        # 备用 provider：默认不降级（不静默换模型）。显式 provider_fallback=mock 用内置 mock；
+        # 配置了 model_fallback 块则装配备用真实 provider；两者皆无则 None。
         fallback = None
         if (config.provider_fallback or "").strip().lower() == "mock":
             from .providers.mock import MockProvider
 
             fallback = MockProvider(script=None)
+        elif config.model_fallback:
+            fallback = build_provider(config.model_fallback, bridge)
         usage = UsageMeter(max_calls=config.max_calls, max_tokens=config.max_tokens)
         agent = Agent(
             registry=registry,
@@ -176,6 +182,7 @@ class Runtime:
             repair_rounds=config.repair_rounds,
             fallback_provider=fallback,
             provider_retries=config.provider_retries,
+            model_summary=config.context_model_summary,
         )
         return cls(
             config=config,

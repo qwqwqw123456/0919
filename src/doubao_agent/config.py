@@ -84,6 +84,7 @@ class Config:
     provider_fallback: str = ""        # 备用 provider："" 不降级（默认）；"mock" 用内置 mock
     tool_cache_enabled: bool = True    # 幂等只读工具结果缓存开关
     tool_cache_ttl: float = 60.0       # 结果缓存存活秒数；0 或开关关闭即不缓存
+    tool_channel_concurrency: int = 3  # 单通道工具并发上限；0 表示不限制
     planning_enabled: bool = False     # 入口单次规划：每任务 1 次模型调用，执行阶段零推理
     skills_dir: Path = field(
         default_factory=lambda: Path(
@@ -91,6 +92,7 @@ class Config:
         )
     )
     context_limit: int = 40            # 单次请求最多携带的消息条数，超出按 user 边界裁剪
+    context_model_summary: bool = False  # 压缩早期消息时是否调模型浓缩（默认关，避免额外模型调用）
     scheduler_enabled: bool = True     # 控制台/守护进程是否轮询 cron 调度
     scheduler_interval: float = 30.0   # 调度轮询间隔（秒）
     watch_enabled: bool = False        # 文件变更监听开关（默认关，避免默认扫工作区起任务）
@@ -105,6 +107,7 @@ class Config:
     port: int = DEFAULT_PORT
     auth_token: str = ""               # 控制台 /api 鉴权令牌；为空表示不鉴权（仅限本机）
     model: dict[str, Any] = field(default_factory=dict)
+    model_fallback: dict[str, Any] = field(default_factory=dict)  # 备用真实 provider 配置，结构同 model；空=不启用
     bridge: dict[str, Any] = field(default_factory=dict)
     embedding: dict[str, Any] = field(default_factory=dict)  # 宿主 embedding 能力，默认自动探测
     auto_approve: list[dict[str, Any]] = field(default_factory=list)  # 规则预授权，替代人工审批
@@ -190,8 +193,12 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.provider_fallback = str(data.get("provider_fallback", cfg.provider_fallback) or "")
         cfg.tool_cache_enabled = bool(data.get("tool_cache_enabled", cfg.tool_cache_enabled))
         cfg.tool_cache_ttl = max(0.0, float(data.get("tool_cache_ttl", cfg.tool_cache_ttl)))
+        cfg.tool_channel_concurrency = max(0, int(data.get("tool_channel_concurrency", cfg.tool_channel_concurrency)))
         cfg.skills_dir = Path(data.get("skills_dir", cfg.workspace / "skills"))
         cfg.context_limit = max(4, int(data.get("context_limit", cfg.context_limit)))
+        cfg.context_model_summary = bool(
+            data.get("context_model_summary", cfg.context_model_summary)
+        )
         cfg.scheduler_enabled = bool(data.get("scheduler_enabled", cfg.scheduler_enabled))
         cfg.scheduler_interval = max(5.0, float(data.get("scheduler_interval", cfg.scheduler_interval)))
         cfg.watch_enabled = bool(data.get("watch_enabled", cfg.watch_enabled))
@@ -209,6 +216,7 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.port = int(data.get("port", cfg.port))
         cfg.auth_token = str(data.get("auth_token", cfg.auth_token) or "")
         cfg.model = dict(data.get("model") or _default_model())
+        cfg.model_fallback = dict(data.get("model_fallback") or {})
         cfg.bridge = dict(data.get("bridge") or {})
         cfg.embedding = dict(data.get("embedding") or {})
         cfg.auto_approve = [
@@ -253,9 +261,18 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.tool_cache_enabled = os.environ["AGENT_TOOL_CACHE"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_TOOL_CACHE_TTL"):
         cfg.tool_cache_ttl = max(0.0, float(os.environ["AGENT_TOOL_CACHE_TTL"]))
+    if os.environ.get("AGENT_TOOL_CHANNEL_CONCURRENCY"):
+        cfg.tool_channel_concurrency = max(
+            0, int(os.environ["AGENT_TOOL_CHANNEL_CONCURRENCY"])
+        )
     cfg.skills_dir = Path(os.environ.get("AGENT_SKILLS_DIR", cfg.skills_dir))
     if os.environ.get("AGENT_CONTEXT_LIMIT"):
         cfg.context_limit = max(4, int(os.environ["AGENT_CONTEXT_LIMIT"]))
+    if os.environ.get("AGENT_CONTEXT_MODEL_SUMMARY"):
+        cfg.context_model_summary = (
+            os.environ["AGENT_CONTEXT_MODEL_SUMMARY"].strip().lower()
+            not in ("0", "false", "no", "off")
+        )
     if os.environ.get("AGENT_MAX_CALLS"):
         cfg.max_calls = max(0, int(os.environ["AGENT_MAX_CALLS"]))
     if os.environ.get("AGENT_MAX_TOKENS"):

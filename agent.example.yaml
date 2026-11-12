@@ -22,6 +22,7 @@ evolution:                      # 技能自进化：用量遥测 + 生命周期�
   stale_days: 14                # 多久没用算闲置
   archive_days: 30              # 多久没用进归档状态（只改状态位）
 context_limit: 40              # 单次请求最多携带的消息条数（超出按 user 边界裁剪）
+context_model_summary: false  # 压缩早期消息时是否调模型浓缩（默认关，开启会额外产生模型调用）
 scheduler_enabled: true        # 控制台/守护进程轮询 cron 定时任务
 scheduler_interval: 30         # 调度轮询间隔（秒）
 watch_enabled: false           # 文件变更监听（默认关）；开启后轮询目录快照，变更广播 file_change 事件
@@ -37,6 +38,7 @@ provider_retries: 1     # 端点异常重试次数；401/403 不重试，直接�
 provider_fallback: ""   # 备用 provider："" 不降级（默认，避免静默换模型骗人）；"mock" 用内置 mock
 tool_cache_enabled: true   # 幂等只读工具结果缓存开关；写工具/非幂等工具不缓存
 tool_cache_ttl: 60         # 结果缓存存活秒数；0 或开关关闭即不缓存
+tool_channel_concurrency: 3  # 单通道工具并发上限；0 表示不限制
 port: 8765
 auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
                                  # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可
@@ -57,6 +59,15 @@ model:
   # api_key_env: OPENAI_API_KEY  # 启动前 export，例如 export OPENAI_API_KEY=sk-xxx
   # 已验证可用示例：base_url: https://api.longcat.chat/openai/v1，model: LongCat-2.5
   temperature: 0.2
+
+# 备用真实 provider（可选）：结构同 model；主端点失败且未配 provider_fallback=mock 时切到这里，
+# 结果带 degraded 标注。留空则不启用备用通道。
+# model_fallback:
+#   provider: openai
+#   base_url: https://backup-endpoint.example.com/v1
+#   model: backup-model-name
+#   api_key_env: OPENAI_API_KEY
+#   temperature: 0.2
 
 # 通用 REST 宿主桥（目标形态，非当前云电脑现状）：
 # 云电脑现状是“能力走 MCP + RSA 签名 REST，推理走上层”，没有这套端点。

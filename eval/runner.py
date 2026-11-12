@@ -67,17 +67,44 @@ async def evaluate(
 
     skipped: list[str] = []
     if include_model:
-        # 端到端样例需要装配 Agent 与真实 provider，离线环境不提供；
-        # 接入真实模型后在此补调用与判定。
-        for case in model_cases:
-            results.append(
-                {"id": case["id"], "ok": False, "failures": ["模型样例尚未接入判定"], "output": ""}
-            )
+        provider = _build_model_provider()
+        if type(provider).__name__ == "MockProvider":
+            # 未配置真实端点（或端点缺失退回 mock）：模型样例不参与离线判定，记跳过。
+            skipped = [case["id"] for case in model_cases]
+            await provider.aclose()
+        else:
+            for case in model_cases:
+                messages = [{"role": "user", "content": case["task"]}]
+                try:
+                    resp = await provider.complete(messages, tools=[])
+                    content = resp.get("content") or ""
+                    failures = _check(case, content)
+                    results.append(
+                        {"id": case["id"], "ok": not failures, "failures": failures, "output": content}
+                    )
+                except Exception as exc:  # noqa: BLE001 - 单条样例失败不中断整轮
+                    results.append(
+                        {
+                            "id": case["id"],
+                            "ok": False,
+                            "failures": [f"模型调用失败：{type(exc).__name__}: {exc}"],
+                            "output": "",
+                        }
+                    )
+            await provider.aclose()
     else:
         skipped = [case["id"] for case in model_cases]
 
     passed = sum(1 for row in results if row["ok"])
     return {"passed": passed, "total": len(results), "skipped": skipped, "results": results}
+
+
+def _build_model_provider() -> Any:
+    """按当前配置构造模型 provider；延迟导入避免离线闸门依赖配置链。"""
+    from doubao_agent.config import load_config
+    from doubao_agent.providers import build_provider
+
+    return build_provider(load_config().model)
 
 
 def _repo_root() -> Path:

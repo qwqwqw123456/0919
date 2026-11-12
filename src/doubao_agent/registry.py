@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import replace
 from typing import Any
@@ -12,7 +13,12 @@ from .utils import dumps
 class CapabilityRegistry:
     """Single entry point for every capability, regardless of its channel."""
 
-    def __init__(self, cache_ttl: float = 60.0, cache_max: int = 128) -> None:
+    def __init__(
+        self,
+        cache_ttl: float = 60.0,
+        cache_max: int = 128,
+        channel_concurrency: int = 3,
+    ) -> None:
         self._sources: dict[str, CapabilitySource] = {}
         self._specs: dict[str, ToolSpec] = {}
         self._dispatch: dict[str, tuple[CapabilitySource, str]] = {}
@@ -21,6 +27,9 @@ class CapabilityRegistry:
         self._cache: dict[str, tuple[float, ToolResult]] = {}
         self._cache_ttl = max(0.0, cache_ttl)
         self._cache_max = max(0, cache_max)
+        # 按通道并发上限；<=0 表示不限制。
+        self._channel_concurrency = max(0, channel_concurrency)
+        self._channel_semaphores: dict[str, asyncio.Semaphore] = {}
 
     def add_source(self, source: CapabilitySource) -> None:
         self._sources[source.name] = source
@@ -79,7 +88,20 @@ class CapabilityRegistry:
             hit = self._cache_get(cache_key)
             if hit is not None:
                 return replace(hit, call_id=call.call_id, meta={**hit.meta, "cached": True})
-        result = await source.call_tool(
+        sem = self._semaphore_for(source.name)
+        if sem is not None:
+            async with sem:
+                result = await self._invoke(source, original, call)
+        else:
+            result = await self._invoke(source, original, call)
+        if cache_key is not None and result.ok:
+            self._cache_put(cache_key, result)
+        return result
+
+    async def _invoke(
+        self, source: CapabilitySource, original: str, call: ToolCall
+    ) -> ToolResult:
+        return await source.call_tool(
             ToolCall(
                 name=original,
                 arguments=call.arguments,
@@ -87,9 +109,15 @@ class CapabilityRegistry:
                 cancel_event=call.cancel_event,
             )
         )
-        if cache_key is not None and result.ok:
-            self._cache_put(cache_key, result)
-        return result
+
+    def _semaphore_for(self, source_name: str) -> asyncio.Semaphore | None:
+        if self._channel_concurrency <= 0:
+            return None
+        sem = self._channel_semaphores.get(source_name)
+        if sem is None:
+            sem = asyncio.Semaphore(self._channel_concurrency)
+            self._channel_semaphores[source_name] = sem
+        return sem
 
     def _cacheable(self, spec: ToolSpec) -> bool:
         return self._cache_ttl > 0 and spec.idempotent and spec.risk == Risk.READ

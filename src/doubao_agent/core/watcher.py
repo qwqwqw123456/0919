@@ -38,13 +38,16 @@ def _snapshot(dirs: list[Path], suffixes: list[str]) -> dict[str, float]:
 
 
 def diff_snapshot(prev: dict[str, float], curr: dict[str, float]) -> list[dict[str, str]]:
-    """对比两次快照，返回新增/修改事件；删除事件不在此骨架内上报。"""
+    """对比两次快照，返回新增/修改/删除事件。"""
     events: list[dict[str, str]] = []
     for path, mtime in curr.items():
         if path not in prev:
             events.append({"event": "created", "path": path})
         elif prev[path] != mtime:
             events.append({"event": "modified", "path": path})
+    for path in prev:
+        if path not in curr:
+            events.append({"event": "deleted", "path": path})
     return events
 
 
@@ -58,6 +61,8 @@ async def _run_watcher(runtime: Any, bus: Any) -> None:
     suffixes = list(config.watch_suffixes)
     prev = _snapshot(dirs, suffixes)
     inflight: set[str] = set()
+    recent: dict[str, float] = {}
+    cooldown = max(0.0, float(config.watch_interval))
     tasks: set[asyncio.Task[Any]] = set()
 
     async def dispatch(event: dict[str, str]) -> None:
@@ -77,11 +82,17 @@ async def _run_watcher(runtime: Any, bus: Any) -> None:
             await asyncio.sleep(config.watch_interval)
             try:
                 curr = _snapshot(dirs, suffixes)
+                now = time.time()
                 for event in diff_snapshot(prev, curr):
                     key = f"{event['event']}:{event['path']}"
                     if key in inflight:
                         continue
-                    inflight.add(key)
+                    # 时间窗内同一路径同类事件合并，避免连续写入重复触发。
+                    last = recent.get(key, 0.0)
+                    if event["event"] != "deleted" and now - last < cooldown:
+                        continue
+                    recent[key] = now
+                    inflight.add(event["path"])
                     task = asyncio.create_task(dispatch(event))
                     tasks.add(task)
                     task.add_done_callback(tasks.discard)

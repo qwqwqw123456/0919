@@ -61,6 +61,42 @@ def _extract_text(content: Any) -> str:
 _CONCLUSION_HINTS = ("结论", "决定", "定稿", "综上", "因此", "已完成", "结果是", "口径", "确认")
 
 _CONCLUSION_HEADER = "【早期结论（已压缩，工具细节已省略）】"
+_MODEL_SUMMARY_HEADER = "【早期要点（模型浓缩，工具细节已省略）】"
+
+
+def _split(
+    messages: list[dict[str, Any]], limit: int
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """按上下文边界拆出 system、保留消息与被裁掉的早期消息。"""
+    system, rest = messages[0], messages[1:]
+    keep = rest[-(limit - 1):]
+    for index, message in enumerate(keep):
+        if message.get("role") == "user":
+            keep = keep[index:]
+            break
+    dropped = rest[:len(rest) - len(keep)]
+    return system, keep, dropped
+
+
+async def _summarize_dropped(
+    provider: ModelProvider, dropped: list[dict[str, Any]]
+) -> str | None:
+    """让模型把被裁早期对话浓缩成结论；失败或空内容时返回 None 回落规则要点。"""
+    transcript = "\n".join(
+        f"[{message.get('role')}] {_extract_text(message.get('content'))}" for message in dropped
+    )
+    if not transcript.strip():
+        return None
+    prompt = (
+        "把下面这段早期对话浓缩成 3-5 条关键结论与已定口径，"
+        "保留具体名称、数值与决定；省略工具细节与过程。\n\n" + transcript
+    )
+    try:
+        resp = await provider.complete([{"role": "user", "content": prompt}], tools=[])
+        text = (resp.get("content") or "").strip()
+        return text or None
+    except Exception:  # noqa: BLE001 - 摘要失败不阻断主链路，回落规则压缩
+        return None
 
 
 def _conclusion_lines(message: dict[str, Any], limit: int = 2, width: int = 120) -> list[str]:
@@ -82,22 +118,19 @@ def _conclusion_lines(message: dict[str, Any], limit: int = 2, width: int = 120)
 
 
 def _compact(
-    messages: list[dict[str, Any]], limit: int
+    messages: list[dict[str, Any]],
+    limit: int,
+    model_note: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """上下文压缩：返回（裁剪后的消息, 被裁掉内容里值得沉淀的结论）。
 
     行为与原先一致（保留 system 与最近消息、对齐 user 边界、早期 user 要点进 system 注记），
-    额外把被裁掉的助手结论抽出来，供调用方写入长期记忆，避免长任务后半段忘记早期口径。
+    额外把被裁掉的助手结论抽出来，供调用方写入长期记忆，避免长任务后半段忘记早期口径；
+    ``model_note`` 为模型浓缩的早期要点，可选，缺失时只用规则抽取。
     """
     if limit <= 2 or len(messages) <= limit:
         return messages, []
-    system, rest = messages[0], messages[1:]
-    keep = rest[-(limit - 1):]
-    for index, message in enumerate(keep):
-        if message.get("role") == "user":
-            keep = keep[index:]
-            break
-    dropped = rest[:len(rest) - len(keep)]
+    system, keep, dropped = _split(messages, limit)
     early: list[str] = []
     conclusions: list[str] = []
     for message in dropped:
@@ -109,6 +142,8 @@ def _compact(
             conclusions.extend(_conclusion_lines(message))
     system_message = dict(system)
     notes: list[str] = []
+    if model_note:
+        notes.append(_MODEL_SUMMARY_HEADER + "\n" + model_note)
     if early:
         notes.append("【早期要点（已压缩，工具细节已省略）】\n- " + "\n- ".join(dict.fromkeys(early)))
     unique_conclusions = list(dict.fromkeys(conclusions))
@@ -203,6 +238,7 @@ class Agent:
         fallback_provider: ModelProvider | None = None,
         provider_retries: int = 1,
         retry_delay: float = 0.2,
+        model_summary: bool = False,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -223,6 +259,7 @@ class Agent:
         self.fallback_provider = fallback_provider
         self.provider_retries = max(0, provider_retries)
         self.retry_delay = max(0.0, retry_delay)
+        self.model_summary = model_summary
         self.last_degraded: str | None = None
         # 会话级产物清单：只扫本会话目录，按路径去重，不做 mtime 缓存（避免同一时间片内漏扫）。
         self._artifact_seen: dict[str, set[str]] = {}
@@ -234,7 +271,11 @@ class Agent:
     async def _complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        trimmed, digest = _compact(messages, self.context_limit)
+        model_note: str | None = None
+        if self.model_summary and type(self.provider).__name__ != "MockProvider":
+            _, _, dropped = _split(messages, self.context_limit)
+            model_note = await _summarize_dropped(self.provider, dropped)
+        trimmed, digest = _compact(messages, self.context_limit, model_note=model_note)
         _persist_digest(self.memory, digest)
         last_error: Exception | None = None
         attempts = self.provider_retries + 1

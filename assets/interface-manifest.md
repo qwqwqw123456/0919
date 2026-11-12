@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 44 个 Python 文件 / 7282 行；测试 25 个文件、137 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 1（`system.status`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
+> 实跑基线：`src/` 下 44 个 Python 文件 / 7476 行；测试 25 个文件、145 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 2（`system.status` / `system.net_check`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -30,7 +30,7 @@
 | `builtin` 脚本 | `sources/script.py` | 代码即动作：Python / bash 非交互执行 | 可配（默认 L1） | `run_python` / `run_shell`；CPU 上限可选 RLIMIT_CPU；支持会话级取消 |
 | `skill` 技能 | `sources/skill.py` | `skills/<name>/SKILL.md`；可执行技能注册为工具，知识技能按需阅读 | 技能 frontmatter 声明，缺省 L1 | 入口限定在技能目录内；参数以 JSON 从 stdin 传入 |
 | `knowledge` 知识 | `sources/knowledge.py` | 长文档分块检索与回写 | search L0 / add L1 | 与短期记忆分工：知识记长文档，记忆记短事实/偏好/经验；文档可归属七个知识域之一 |
-| `system` 系统 | `sources/system.py` | 只读运行环境指标（CPU/内存/磁盘/进程 RSS） | status L0 | 标准库采集，不依赖 shell 与宿主桥；供规划判断资源可行性 |
+| `system` 系统 | `sources/system.py` | 只读运行环境指标（CPU/内存/磁盘/进程 PID·线程·RSS）与 TCP 连通探测 | status / net_check 均 L0 | 标准库采集，不依赖 shell 与宿主桥；供规划判断资源可行性与网络可达性 |
 | `native` 原生 | `sources/native.py` | 宿主 `/capabilities` 清单动态发现 | 清单声明，否则按名称关键词推断 | 桥不可用时返回空；桥存在但清单为空且 `fallback=true` 时挂浏览器/桌面兜底目录 |
 | `browser` 浏览器 | `sources/browser.py` | 兜底工具目录（9 个） | 只读 L0 / 可逆 L1 | 仅在原生通道走兜底目录时注册；实际执行交宿主桥 |
 | `desktop` 桌面 | `sources/desktop.py` | 兜底工具目录（8 个） | 只读 L0 / 可逆 L1 | 同上 |
@@ -49,7 +49,8 @@
 | `script.run_shell` | builtin | L1 | `command:str`，可选 `cwd`、`timeout` | 执行非交互 bash 命令 |
 | `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4` | 通道内走异步 `asearch`；有 `embed`/`aembed` 时切余弦向量，异步 embedding 失败自动退回关键词 + 字符 bigram 混合检索；分块向量按文本 sha1 缓存 |
 | `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块；兼容 `content`/`body`、`name`/`heading` 别名，缺字段时错误信息回显实际收到的字段；域归属留空，由 CLI/API 显式指定 |
-| `system.status` | system | L0 | 可选 `path:str`（磁盘用量目录，默认工作区） | 返回 CPU 核数、内存总量/可用、本进程 RSS、磁盘用量；结构化指标在 `meta.metrics`；非 Linux 内存项标注不可读 |
+| `system.status` | system | L0 | 可选 `path:str`（磁盘用量目录，默认工作区） | 返回 CPU 核数、内存总量/可用、本进程 PID/线程数/RSS、磁盘用量；结构化指标在 `meta.metrics`；非 Linux 内存/线程项标注不可读 |
+| `system.net_check` | system | L0 | `host:str`、`port:int`，可选 `timeout:number=3.0` | 异步 TCP 连通探测，建连后立即关闭、不发业务数据；可达性与原因在 `meta.probe`，不可达返回原因不报错 |
 | `skill.read` | skill | L0 | `name:str` | 阅读指定技能完整说明与资源清单（渐进式加载） |
 | `skill.text-stats` | skill | L0 | 见技能 `input_schema` | 示例可执行技能，入口 `skills/text-stats/main.py`，统计字符/中文/词/行/高频词 |
 | `skill.pre-write-check` | skill | L0 | `text:str` | 写操作前 D/S/P/A 风险扫描（删除/发送/付费/权限迁移），切句 + 否定紧邻豁免；命中输出 `VERDICT=block`，shell 入口 `skills/pre-write-check/check.sh`，退出码恒 0、结果看文本 |
@@ -130,7 +131,7 @@
 
 调度器：`_run_scheduler` 每轮扫描到期任务，为每个任务建独立 `asyncio.Task` 并发派发（`asyncio.Semaphore(3)` 限流）；`inflight` 集合去重，同一任务未结束不会被重复触发；执行结束才 `mark_ran`，服务关闭时取消所有未完成子任务。单个任务异常不影响调度循环。
 
-文件监听：`watch_enabled` 开启后 `_run_watcher` 按 `watch_interval` 轮询 `watch_dirs`（空=工作区）文件 mtime 快照，首批只建基线不上报；新增/修改广播 `file_change` 事件；配置了 `watch_task` 模板（占位符 `{path}`/`{event}`）才触发一次 `start_run`，否则只广播不起任务；`watch_suffixes` 可按后缀过滤。默认关闭。
+文件监听：`watch_enabled` 开启后 `_run_watcher` 按 `watch_interval` 轮询 `watch_dirs`（空=工作区）文件 mtime 快照，首批只建基线不上报；新增/修改/删除广播 `file_change` 事件，同路径同类事件在一个轮询窗口内防抖合并；配置了 `watch_task` 模板（占位符 `{path}`/`{event}`）才触发一次 `start_run`，否则只广播不起任务；`watch_suffixes` 可按后缀过滤。默认关闭。
 
 ---
 
@@ -144,7 +145,7 @@
 | `subtasks` | `task`、`subtasks`、`count` | 并行拆解结果 |
 | `finish` | `session`、`answer`、可选 `subtasks` | 任务收尾 |
 | `schedule_start` | `id`、`name` | 定时任务派发 |
-| `file_change` | `event`（created/modified）、`path` | 文件监听捕获变更 |
+| `file_change` | `event`（created/modified/deleted）、`path` | 文件监听捕获变更 |
 
 ---
 
@@ -220,7 +221,7 @@
 | `openai` | `model.provider=openai` | OpenAI 兼容 `/chat/completions`；`base_url` 必须显式配置，缺失时告警并退回 `mock`（不默认连 `api.openai.com`，避免误产生费用）；key 取 `api_key` 或 `api_key_env`（默认 `OPENAI_API_KEY`）；支持 `tool_calls` 与多模态 `image_url` |
 | `mock` | 未识别或兜底 | 确定性脚本回复，供测试与离线演示 |
 
-统一返回 `{content, tool_calls, usage}`；空 `choices` 或缺 `message` 回退空结果，不崩溃。
+统一返回 `{content, tool_calls, usage}`；空 `choices` 或缺 `message` 回退空结果，不崩溃。主端点重试耗尽后，按 `provider_fallback=mock` 或 `model_fallback` 配置切备用通道，结果带 `degraded` / `degraded_provider` 标注；默认不降级。
 
 ### 10.1 知识向量供给（`providers/embedding.py`）
 
@@ -236,18 +237,20 @@
 
 配置文件（`agent.yaml`，模板 `agent.example.yaml`）字段：
 
-`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`watch_enabled`、`watch_dirs`、`watch_interval`、`watch_task`、`watch_suffixes`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`provider_retries`、`provider_fallback`、`tool_cache_enabled`、`tool_cache_ttl`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
+`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`context_model_summary`、`scheduler_enabled`、`scheduler_interval`、`watch_enabled`、`watch_dirs`、`watch_interval`、`watch_task`、`watch_suffixes`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`provider_retries`、`provider_fallback`、`tool_cache_enabled`、`tool_cache_ttl`、`tool_channel_concurrency`、`port`、`auth_token`、`model`、`model_fallback`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
 - `max_calls` / `max_tokens`：单次运行的模型调用数与 token 预算，`0` 表示不限；超限时任务以 `incomplete` 收尾并直接说明预算耗尽。
 - `repair_rounds`：工具失败后允许模型修正参数重试的轮数，`0` 表示不修正。
-- `provider_retries`：模型端点异常重试次数；401/403/404 不重试，直接进降级判断；`provider_fallback` 为 `"mock"` 时主端点失败切内置 mock 兜底并在结果标注 `degraded`，留空则不降级、异常上抛。
+- `provider_retries`：模型端点异常重试次数；401/403/404 不重试，直接进降级判断；`provider_fallback` 为 `"mock"` 时主端点失败切内置 mock 兜底；配置 `model_fallback` 块（结构同 `model`）时装配备用真实 provider；切换后结果标注 `degraded`，两者皆留空则不降级、异常上抛。
 - `tool_cache_enabled` / `tool_cache_ttl`：幂等且只读（L0）工具的结果进程内缓存开关与存活秒数；写工具、非幂等工具不缓存；配方 replay 强制绕过缓存真实重放。
+- `tool_channel_concurrency`：单通道工具并发上限（默认 3），registry 按通道信号量排队；`0` 表示不限制。
+- `context_model_summary`：上下文压缩时是否调模型浓缩被裁早期消息（默认关）；开启后额外产生模型调用，摘要失败回落规则要点。
 - `evolution`：技能用量遥测与生命周期审计；`stale_days`（默认 14）未用算闲置，`archive_days`（默认 30）进归档，只改状态位不删文件；`pinned` 技能不参与自动流转。
 - `mcp_servers` 会与 `<db_path 所在目录>/mcp.local.yaml`（`mcp add/remove` 写入）合并，同名以 `agent.yaml` 为准。
 
 环境变量覆盖（前缀 `AGENT_*`）：
 
-`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_WATCH_ENABLED`、`AGENT_WATCH_INTERVAL`、`AGENT_WATCH_TASK`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_PROVIDER_RETRIES`、`AGENT_PROVIDER_FALLBACK`、`AGENT_TOOL_CACHE`、`AGENT_TOOL_CACHE_TTL`、`AGENT_EVOLUTION`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
+`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_WATCH_ENABLED`、`AGENT_WATCH_INTERVAL`、`AGENT_WATCH_TASK`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_CONTEXT_MODEL_SUMMARY`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_PROVIDER_RETRIES`、`AGENT_PROVIDER_FALLBACK`、`AGENT_TOOL_CACHE`、`AGENT_TOOL_CACHE_TTL`、`AGENT_TOOL_CHANNEL_CONCURRENCY`、`AGENT_EVOLUTION`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
 
 - `.env.local` 自动加载：`load_config()` 启动时读取当前目录与工作区的 `.env.local`，解析 `KEY=VALUE` 行（兼容剥离 `export ` 前缀，注释/空行跳过）；只补缺省变量，已存在的环境变量优先不覆盖；文件缺失或读取失败静默跳过，不引入 `python-dotenv` 依赖。
 
