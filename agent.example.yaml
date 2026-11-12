@@ -62,3 +62,9 @@ mcp_servers:
 api_sources: []
 #  - name: crm
 #    spec: /workspace/config/crm.openapi.json
+
+# 宿主 embedding（可选）：桥的能力清单里有该名字就自动启用，否则知识库保持关键词检索。
+# 运行时也可用 AGENT_EMBEDDING_CAPABILITY 覆盖。
+# embedding:
+#   enabled: true
+#   capability: embed

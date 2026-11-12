@@ -18,6 +18,7 @@ from .core.scheduler import ScheduleStore
 from .core.session import SessionStore
 from .core.usage import UsageMeter
 from .providers import ModelProvider, build_provider
+from .providers.embedding import BridgeEmbedding
 from .registry import CapabilityRegistry
 from .skills import SkillManager
 from .sources import (
@@ -92,7 +93,20 @@ class Runtime:
         if skills.list():
             registry.add_source(SkillSource(skills))
 
-        knowledge = KnowledgeStore(config.db_path)
+        # 宿主 embedding：桥可用且暴露对应能力时才启用，否则保持关键词检索。
+        aembed: Callable[[str], Any] | None = None
+        embedding_cfg = dict(config.embedding or {})
+        if bridge is not None and embedding_cfg.get("enabled", True):
+            embedding = BridgeEmbedding(bridge, str(embedding_cfg.get("capability") or "embed"))
+            if await embedding.available():
+                aembed = embedding.embed
+            else:
+                print(
+                    "[warn] 宿主未提供 embedding 能力，知识库退回关键词检索",
+                    file=sys.stderr,
+                )
+
+        knowledge = KnowledgeStore(config.db_path, aembed=aembed)
         registry.add_source(KnowledgeSource(knowledge))
 
         await registry.refresh()

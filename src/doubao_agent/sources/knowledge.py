@@ -61,7 +61,7 @@ class KnowledgeSource:
             if not query:
                 return ToolResult(call_id=call.call_id, ok=False, error="query is required")
             limit = int(args.get("limit") or 4)
-            hits = self.store.search(query, limit=limit)
+            hits = await self.store.asearch(query, limit=limit)
             if not hits:
                 return ToolResult(call_id=call.call_id, ok=True, content="（知识库中没有找到相关内容）")
             lines = []
@@ -86,7 +86,7 @@ class KnowledgeSource:
 
     async def health(self) -> tuple[bool, str]:
         stats = self.store.stats()
-        mode = "vector" if self.store.embed is not None else "hybrid"
+        mode = "vector" if (self.store.embed or self.store.aembed) else "hybrid"
         return True, f"{stats['documents']} docs / {stats['chunks']} chunks · {mode}"
 
     async def aclose(self) -> None:

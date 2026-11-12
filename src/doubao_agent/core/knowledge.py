@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -75,13 +75,20 @@ class KnowledgeStore:
     """知识库：文档分块存储 + 语义化检索，供 agent 引用。
 
     与 Memory 分工：Memory 记"短事实/偏好/经验"，Knowledge 记"长文档/资料"。
-    `embed` 可选：传入返回向量的函数后，检索切换为向量余弦相似度（接豆包 embedding）。
+    `embed` 为同步向量函数；`aembed` 为异步向量函数（宿主桥这类 IO 型 embedding 用）。
+    任一提供即切换为向量余弦检索，异步路径失败时退回关键词检索而不是报错。
     """
 
-    def __init__(self, db_path: str | Path, embed: Callable[[str], list[float]] | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        embed: Callable[[str], list[float]] | None = None,
+        aembed: Callable[[str], Awaitable[list[float]]] | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.embed = embed
+        self.aembed = aembed
         self._lock = threading.Lock()
         self._vec_cache: dict[str, tuple[float, ...]] = {}
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -119,20 +126,44 @@ class KnowledgeStore:
         query = query.strip()
         if not query:
             return []
+        rows = self._rows()
+        if self.embed is not None:
+            query_vec = self.embed(query)
+            scored: list[tuple[float, sqlite3.Row]] = [
+                (self._cosine(query_vec, self._embed_chunk(row["text"])), row) for row in rows
+            ]
+        else:
+            scored = [(_score_chunk(query, row["text"]), row) for row in rows]
+        return self._pick(scored, limit, per_doc)
+
+    async def asearch(self, query: str, limit: int = 4, per_doc: int = 2) -> list[dict[str, Any]]:
+        """异步检索：优先用 aembed；宿主 embedding 不可用时退回关键词检索。"""
+        query = query.strip()
+        if not query:
+            return []
+        if self.aembed is None:
+            return self.search(query, limit=limit, per_doc=per_doc)
+        rows = self._rows()
+        try:
+            query_vec = await self.aembed(query)
+            scored: list[tuple[float, sqlite3.Row]] = [
+                (self._cosine(query_vec, await self._aembed_chunk(row["text"])), row) for row in rows
+            ]
+        except Exception:  # noqa: BLE001 - 语义检索失败不应让检索整体失败
+            scored = [(_score_chunk(query, row["text"]), row) for row in rows]
+        return self._pick(scored, limit, per_doc)
+
+    def _rows(self) -> list[sqlite3.Row]:
         with self._lock:
-            rows = self._conn.execute(
+            return self._conn.execute(
                 "SELECT c.id, c.doc_id, c.idx, c.text, d.title, d.source "
                 "FROM chunks c JOIN documents d ON d.id = c.doc_id"
             ).fetchall()
 
-        if self.embed is not None:
-            query_vec = self.embed(query)
-            scored: list[tuple[float, sqlite3.Row]] = []
-            for row in rows:
-                scored.append((self._cosine(query_vec, self._embed_chunk(row["text"])), row))
-        else:
-            scored = [(_score_chunk(query, row["text"]), row) for row in rows]
-
+    @staticmethod
+    def _pick(
+        scored: list[tuple[float, sqlite3.Row]], limit: int, per_doc: int
+    ) -> list[dict[str, Any]]:
         scored.sort(key=lambda item: -item[0])
         picked: list[dict[str, Any]] = []
         seen_docs: dict[int, int] = {}
@@ -162,6 +193,18 @@ class KnowledgeStore:
         vec = self._vec_cache.get(key)
         if vec is None:
             vec = tuple(self.embed(text))
+            if len(self._vec_cache) >= _VEC_CACHE_LIMIT:
+                self._vec_cache.clear()
+            self._vec_cache[key] = vec
+        return vec
+
+    async def _aembed_chunk(self, text: str) -> tuple[float, ...]:
+        key = hashlib.sha1(text.encode("utf-8")).hexdigest()
+        vec = self._vec_cache.get(key)
+        if vec is None:
+            embed = self.aembed
+            assert embed is not None
+            vec = tuple(await embed(text))
             if len(self._vec_cache) >= _VEC_CACHE_LIMIT:
                 self._vec_cache.clear()
             self._vec_cache[key] = vec

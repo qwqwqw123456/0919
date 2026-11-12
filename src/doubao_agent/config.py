@@ -10,6 +10,11 @@ import yaml
 DEFAULT_PORT = 8765
 
 
+def _default_workspace() -> Path:
+    """工作区根目录：优先 AGENT_WORKSPACE，其次当前目录（不再写死 /workspace）。"""
+    return Path(os.environ.get("AGENT_WORKSPACE") or Path.cwd()).resolve()
+
+
 @dataclass
 class MCPServerConfig:
     name: str
@@ -28,15 +33,25 @@ class ApiSourceConfig:
 
 @dataclass
 class Config:
-    workspace: Path = Path("/workspace")
-    runs_dir: Path = Path("/workspace/runs")
-    db_path: Path = Path("/workspace/.agent/agent.db")
+    workspace: Path = field(default_factory=_default_workspace)
+    runs_dir: Path = field(
+        default_factory=lambda: Path(os.environ.get("AGENT_RUNS_DIR") or _default_workspace() / "runs")
+    )
+    db_path: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("AGENT_DB_PATH") or _default_workspace() / ".agent" / "agent.db"
+        )
+    )
     permission_mode: str = "guarded"   # auto | guarded | manual
     script_risk: str = "L1"            # 脚本通道的风险等级：L1 直接执行，L2 起需确认
     script_max_cpu: float = 0.0        # 脚本 CPU 时间上限（秒），0 表示不限
     record_recipes: bool = True        # 成功任务自动录制为可零模型回放的配方
     planning_enabled: bool = False     # 入口单次规划：每任务 1 次模型调用，执行阶段零推理
-    skills_dir: Path = Path("/workspace/skills")  # Skill 包目录（*/SKILL.md）
+    skills_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("AGENT_SKILLS_DIR") or _default_workspace() / "skills"
+        )
+    )
     context_limit: int = 40            # 单次请求最多携带的消息条数，超出按 user 边界裁剪
     scheduler_enabled: bool = True     # 控制台/守护进程是否轮询 cron 调度
     scheduler_interval: float = 30.0   # 调度轮询间隔（秒）
@@ -44,6 +59,7 @@ class Config:
     port: int = DEFAULT_PORT
     model: dict[str, Any] = field(default_factory=dict)
     bridge: dict[str, Any] = field(default_factory=dict)
+    embedding: dict[str, Any] = field(default_factory=dict)  # 宿主 embedding 能力，默认自动探测
     auto_approve: list[dict[str, Any]] = field(default_factory=list)  # 规则预授权，替代人工审批
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     api_sources: list[ApiSourceConfig] = field(default_factory=list)
@@ -88,7 +104,13 @@ def _parse_mcp(items: list[dict[str, Any]]) -> list[MCPServerConfig]:
 
 def load_config(path: str | Path | None = None) -> Config:
     cfg = Config()
-    cfg_path = Path(path or os.environ.get("DOUBAO_AGENT_CONFIG", "/workspace/agent.yaml"))
+    cfg_path = Path(
+        path or os.environ.get("DOUBAO_AGENT_CONFIG") or (cfg.workspace / "agent.yaml")
+    )
+    if not cfg_path.exists():
+        legacy = Path("/workspace/agent.yaml")
+        if legacy.exists():
+            cfg_path = legacy
 
     if cfg_path.exists():
         try:
@@ -116,6 +138,7 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.port = int(data.get("port", cfg.port))
         cfg.model = dict(data.get("model") or _default_model())
         cfg.bridge = dict(data.get("bridge") or {})
+        cfg.embedding = dict(data.get("embedding") or {})
         cfg.auto_approve = [
             dict(item) for item in data.get("auto_approve", []) if isinstance(item, dict)
         ]
@@ -154,6 +177,8 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.bridge["enabled"] = True
     if os.environ.get("AGENT_BRIDGE_TOKEN"):
         cfg.bridge["token"] = os.environ["AGENT_BRIDGE_TOKEN"]
+    if os.environ.get("AGENT_EMBEDDING_CAPABILITY"):
+        cfg.embedding["capability"] = os.environ["AGENT_EMBEDDING_CAPABILITY"]
 
     cfg.ensure_dirs()
     return cfg
