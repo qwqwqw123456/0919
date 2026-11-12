@@ -106,9 +106,20 @@ def _terms(text: str) -> set[str]:
 class SkillManager:
     """扫描技能目录；元数据常驻，正文与资源按需加载。"""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, usage: Any = None) -> None:
         self.root = Path(root)
         self._skills: dict[str, Skill] = {}
+        # 用量记录器（core.evolution.EvolutionStore）；可缺省，缺省时技能库照常工作。
+        self.usage = usage
+
+    def _meter(self, name: str, event: str) -> None:
+        """记账失败不能拖垮技能加载：遥测是旁路，不是主链路。"""
+        if self.usage is None:
+            return
+        try:
+            self.usage.record(name, event)
+        except Exception:  # noqa: BLE001 - best-effort
+            pass
 
     def refresh(self) -> int:
         skills: dict[str, Skill] = {}
@@ -183,5 +194,6 @@ class SkillManager:
         for skill in self.match(query, limit):
             if skill.executable:
                 continue
+            self._meter(skill.name, "view")
             sections.append(f"### {skill.name}\n{skill.body[:MAX_KNOWLEDGE_CHARS]}")
         return "\n\n".join(sections)

@@ -40,12 +40,19 @@ doubao-agent resume <会话ID>
 doubao-agent sessions
 doubao-agent tools | sources | skills [reload|install <目录>|uninstall <名称>]
 doubao-agent mcp list | mcp add <名称> --url <地址> | mcp remove <名称>
+doubao-agent evolve status | audit [--apply] | pin <技能> | distill <配方号> | report
 doubao-agent state show
 doubao-agent longterm stats
 doubao-agent knowledge domains
 doubao-agent audit verify [会话ID] | audit sessions
 doubao-agent serve                     # 控制台 + SSE，默认 8765
 ```
+
+## 自进化
+
+技能用量自动记账（use / view / 最后使用），按 14 / 30 天阈值流转 active → 闲置 → 归档，
+只改状态位不删文件；成功配方可蒸馏成技能草案放进 `skills/_drafts`，人工确认后再安装。
+详见 [docs/EVOLUTION.md](docs/EVOLUTION.md)。
 
 ## 记忆结构
 

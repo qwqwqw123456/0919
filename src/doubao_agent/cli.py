@@ -14,6 +14,8 @@ import yaml
 
 from .config import Config, load_config
 from .core.audit import AuditLog
+from .core.evolution import EvolutionStore
+from .core.recipe import RecipeStore
 from .core.memory import KINDS as MEMORY_KINDS
 from .runtime import Runtime
 from .types import ToolCall, ToolSpec
@@ -49,6 +51,116 @@ def _print_event(event: dict[str, Any]) -> None:
 def _usage_line(result: dict[str, Any]) -> str:
     usage = result.get("usage") or {}
     return f"调用={usage.get('calls', 0)} tokens={usage.get('total_tokens', 0)}"
+
+
+def _evolve_command(args: argparse.Namespace, cfg: Config) -> int:
+    """自进化命令组：读用量、跑生命周期、蒸馏配方。只改状态位，不删技能文件。"""
+    if not cfg.evolution_enabled:
+        print("自进化已关闭（evolution.enabled=false 或 AGENT_EVOLUTION=0）", file=sys.stderr)
+        return 1
+    store = EvolutionStore(
+        cfg.db_path,
+        stale_days=cfg.evolution_stale_days,
+        archive_days=cfg.evolution_archive_days,
+    )
+    try:
+        if args.action == "status":
+            data = store.status(top=args.top)
+            print(
+                f"技能 {data['total']} 个 ｜ active {data['state_counts']['active']} / "
+                f"stale {data['state_counts']['stale']} / archived {data['state_counts']['archived']} "
+                f"｜ 钉住 {data['pinned']}"
+            )
+            if not data["total"]:
+                print("（还没有遥测数据：跑一次用到技能的任务后再看）")
+                return 0
+            print("\n【使用排行】")
+            if data["top"]:
+                for row in data["top"]:
+                    last = (
+                        time.strftime("%Y-%m-%d %H:%M", time.localtime(row["last_used_at"]))
+                        if row["last_used_at"]
+                        else "—"
+                    )
+                    print(
+                        f"  {row['name']:<28} use={row['use_count']:<4} view={row['view_count']:<4} "
+                        f"patch={row['patch_count']:<3} 最后={last}"
+                    )
+            else:
+                print("  （还没有技能被真正执行过）")
+            print("\n【冷技能：一次没用过】")
+            if data["cold"]:
+                for row in data["cold"]:
+                    mark = "📌" if row["pinned"] else ""
+                    print(f"  {row['name']:<28} 闲置 {row['idle_days']} 天 {mark}")
+            else:
+                print("  （无）")
+            return 0
+
+        if args.action == "audit":
+            plan = store.audit(apply=args.apply)
+            if not plan:
+                print("无流转：全部技能都在阈值内，或被 pin 保护")
+                return 0
+            print(f"拟流转 {len(plan)} 项：")
+            for item in plan:
+                print(f"  {item['name']:<28} {item['from']} → {item['to']}（闲置 {item['idle_days']} 天）")
+            if not args.apply:
+                print("\n这是预演，未改动状态。确认后加 --apply（只改状态位，不删文件）")
+                return 0
+            print("\n已流转；技能文件原样保留，路径引用不受影响")
+            return 0
+
+        if args.action in ("pin", "unpin"):
+            if not args.target:
+                print(f"用法：evolve {args.action} <技能名>", file=sys.stderr)
+                return 2
+            ok = store.pin(args.target, args.action == "pin")
+            if not ok:
+                print(f"技能不存在：{args.target}", file=sys.stderr)
+                return 1
+            print(f"{args.target} 已{'钉住（不会被自动流转）' if args.action == 'pin' else '解除钉住'}")
+            return 0
+
+        if args.action == "distill":
+            if not args.target or not str(args.target).isdigit():
+                print("用法：evolve distill <配方编号>", file=sys.stderr)
+                return 2
+            recipes = RecipeStore(cfg.db_path)
+            try:
+                recipe = recipes.get(int(args.target))
+            finally:
+                recipes.close()
+            if recipe is None:
+                print(f"配方不存在：{args.target}", file=sys.stderr)
+                return 1
+            try:
+                path = store.distill(recipe, cfg.skills_dir, force=args.force)
+            except (ValueError, FileExistsError) as exc:
+                print(f"失败：{exc}", file=sys.stderr)
+                return 1
+            print(f"已生成技能草案：{path}")
+            print("草案放在 _drafts 下，不会被自动加载；确认后执行：doubao-agent skills install <草案目录>")
+            return 0
+
+        if args.action == "report":
+            data = store.status(top=args.top)
+            rows = store.rows()
+            recent = [r for r in rows if r["last_used_at"]]
+            print("== 技能生态周报 ==")
+            print(f"技能总数 {data['total']}｜活跃 {data['state_counts']['active']}｜"
+                  f"闲置 {data['state_counts']['stale']}｜归档 {data['state_counts']['archived']}")
+            print(f"最近有使用记录 {len(recent)} 个，从未使用 {data['total'] - len(recent)} 个")
+            hot = data["top"][:3]
+            if hot:
+                print("高频：" + "、".join(f"{r['name']}({r['use_count']})" for r in hot))
+            if data["cold"]:
+                print("待观察：" + "、".join(r["name"] for r in data["cold"][:5]))
+            print("下一步：evolve audit 预演 → evolve audit --apply 流转 → 冷技能决定补登记或下线")
+            return 0
+    finally:
+        store.close()
+    return 0
 
 
 def _audit_command(args: argparse.Namespace, cfg: Config) -> int:
@@ -673,6 +785,16 @@ def main(argv: list[str] | None = None) -> int:
     longterm_parser.add_argument("--gap", default=None)
     longterm_parser.add_argument("--fix", default="")
 
+    evolve_parser = sub.add_parser("evolve", help="自进化：技能用量 / 生命周期审计 / 配方蒸馏")
+    evolve_parser.add_argument(
+        "action", choices=["status", "audit", "pin", "unpin", "distill", "report"],
+        help="status 用量 | audit 流转 | pin/unpin 钉住 | distill 配方转技能草案 | report 周报",
+    )
+    evolve_parser.add_argument("target", nargs="?", default=None, help="技能名或配方编号")
+    evolve_parser.add_argument("--apply", action="store_true", help="audit：真正执行流转（默认只预演）")
+    evolve_parser.add_argument("--top", type=int, default=10, help="排行榜条数")
+    evolve_parser.add_argument("--force", action="store_true", help="distill：覆盖已有草案")
+
     parallel_parser = sub.add_parser("parallel", help="并行协同：拆解任务、并发执行子任务并汇总")
     parallel_parser.add_argument("task")
     parallel_parser.add_argument("--subtasks", default=None, help="逗号分隔的子任务列表（省略则自动拆解）")
@@ -702,6 +824,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "audit":
         return _audit_command(args, cfg)
+
+    if args.cmd == "evolve":
+        return _evolve_command(args, cfg)
 
     if args.cmd == "serve":
         try:

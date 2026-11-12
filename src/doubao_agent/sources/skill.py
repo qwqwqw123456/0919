@@ -66,6 +66,7 @@ class SkillSource:
             skill = self.manager.get(name)
             if skill is None:
                 return ToolResult(call_id=call.call_id, ok=False, error=f"unknown skill: {name}")
+            self.manager._meter(skill.name, "view")
             resources = "\n".join(f"- {item}" for item in skill.resources()) or "-（无）"
             content = (
                 f"# {skill.name} v{skill.version}\n\n"
@@ -78,7 +79,9 @@ class SkillSource:
         skill = self.manager.get(call.name)
         if skill is None or not skill.executable:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown skill tool: {call.name}")
-        return await self._run(skill, call)
+        result = await self._run(skill, call)
+        self.manager._meter(skill.name, "use")
+        return result
 
     async def _run(self, skill: Skill, call: ToolCall) -> ToolResult:
         started = time.perf_counter()

@@ -10,6 +10,7 @@ from .core.agent import Agent
 from .core.audit import AuditLog
 from .core.coordinator import Coordinator
 from .core.knowledge import KnowledgeStore
+from .core.evolution import EvolutionStore
 from .core.longterm import LongTermMemory
 from .core.memory import MemoryStore
 from .core.permissions import Approver, PermissionPolicy
@@ -51,6 +52,7 @@ class Runtime:
     skills: SkillManager
     usage: UsageMeter
     scheduler: ScheduleStore
+    evolution: EvolutionStore | None = None
     # 正在运行的会话 → 该次运行专属的 Agent（取消只作用于对应会话）
     _runs: dict[str, Agent] = field(default_factory=dict, repr=False, compare=False)
 
@@ -105,7 +107,16 @@ class Runtime:
             )
         )
 
-        skills = SkillManager(config.skills_dir)
+        evolution = (
+            EvolutionStore(
+                config.db_path,
+                stale_days=config.evolution_stale_days,
+                archive_days=config.evolution_archive_days,
+            )
+            if config.evolution_enabled
+            else None
+        )
+        skills = SkillManager(config.skills_dir, usage=evolution)
         skills.refresh()
         if skills.list():
             registry.add_source(SkillSource(skills))
@@ -169,6 +180,7 @@ class Runtime:
             skills=skills,
             usage=usage,
             scheduler=scheduler,
+            evolution=evolution,
         )
 
     async def aclose(self) -> None:

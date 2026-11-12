@@ -17,6 +17,10 @@ record_recipes: true            # 成功任务自动录制为配方，可零模�
 planning:
   enabled: true                 # 每个任务只规划一次，执行阶段零推理；命中配方则 0 次
 skills_dir: /workspace/skills   # Skill 包目录，每个技能一个子目录 + SKILL.md
+evolution:                      # 技能自进化：用量遥测 + 生命周期审计（不删任何技能文件）
+  enabled: true
+  stale_days: 14                # 多久没用算闲置
+  archive_days: 30              # 多久没用进归档状态（只改状态位）
 context_limit: 40              # 单次请求最多携带的消息条数（超出按 user 边界裁剪）
 scheduler_enabled: true        # 控制台/守护进程轮询 cron 定时任务
 scheduler_interval: 30         # 调度轮询间隔（秒）

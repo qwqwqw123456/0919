@@ -77,6 +77,9 @@ class Config:
     script_risk: str = "L1"            # 脚本通道的风险等级：L1 直接执行，L2 起需确认
     script_max_cpu: float = 0.0        # 脚本 CPU 时间上限（秒），0 表示不限
     record_recipes: bool = True        # 成功任务自动录制为可零模型回放的配方
+    evolution_enabled: bool = True     # 技能用量遥测 + 生命周期审计（抄自 Hermes curator）
+    evolution_stale_days: int = 14     # 多久没用算闲置
+    evolution_archive_days: int = 30   # 多久没用进归档状态（只改状态位，不删文件）
     planning_enabled: bool = False     # 入口单次规划：每任务 1 次模型调用，执行阶段零推理
     skills_dir: Path = field(
         default_factory=lambda: Path(
@@ -164,6 +167,16 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.script_risk = data.get("script_risk", cfg.script_risk)
         cfg.script_max_cpu = float(data.get("script_max_cpu", cfg.script_max_cpu))
         cfg.record_recipes = bool(data.get("record_recipes", cfg.record_recipes))
+        evolution = data.get("evolution") or {}
+        if isinstance(evolution, dict):
+            cfg.evolution_enabled = bool(evolution.get("enabled", cfg.evolution_enabled))
+            cfg.evolution_stale_days = max(
+                1, int(evolution.get("stale_days", cfg.evolution_stale_days))
+            )
+            cfg.evolution_archive_days = max(
+                cfg.evolution_stale_days,
+                int(evolution.get("archive_days", cfg.evolution_archive_days)),
+            )
         cfg.skills_dir = Path(data.get("skills_dir", cfg.workspace / "skills"))
         cfg.context_limit = max(4, int(data.get("context_limit", cfg.context_limit)))
         cfg.scheduler_enabled = bool(data.get("scheduler_enabled", cfg.scheduler_enabled))
@@ -202,6 +215,8 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.scheduler_enabled = os.environ["AGENT_SCHEDULER_ENABLED"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_SCHEDULER_INTERVAL"):
         cfg.scheduler_interval = max(5.0, float(os.environ["AGENT_SCHEDULER_INTERVAL"]))
+    if os.environ.get("AGENT_EVOLUTION") is not None:
+        cfg.evolution_enabled = os.environ["AGENT_EVOLUTION"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_RECORD_RECIPES") is not None:
         cfg.record_recipes = os.environ["AGENT_RECORD_RECIPES"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_PLANNING") is not None:
