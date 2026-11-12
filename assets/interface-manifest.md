@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 44 个 Python 文件 / 7476 行；测试 25 个文件、145 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 2（`system.status` / `system.net_check`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
+> 实跑基线：`src/` 下 44 个 Python 文件 / 7476 行；测试 28 个文件、158 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 2（`system.status` / `system.net_check`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---

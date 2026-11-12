@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 44 个 Python 文件 / 7476 行 / 25 测试文件 / 145 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 44 个 Python 文件 / 7476 行 / 28 测试文件 / 158 passed，分支 `feat/evolution-layer`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
