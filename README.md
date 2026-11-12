@@ -66,7 +66,7 @@ doubao-agent serve                     # 控制台 + SSE，默认 8765
 
 技能用量自动记账（use / view / 最后使用），按 14 / 30 天阈值流转 active → 闲置 → 归档，
 只改状态位不删文件；成功配方可蒸馏成技能草案放进 `skills/_drafts`，人工确认后再安装。
-详见 [docs/EVOLUTION.md](docs/EVOLUTION.md)。
+详见 [docs/EVOLUTION.md](docs/EVOLUTION.md)；架构方案见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，缺口路线图见 [docs/GAPS.md](docs/GAPS.md)。
 
 ## 记忆结构
 
