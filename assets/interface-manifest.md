@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 41 个 Python 文件 / 6309 行；测试 96 passed；注册表静态工具 6 个，原生兜底工具 17 个（条件触发，见第 3 节）。
+> 实跑基线：`src/` 下 41 个 Python 文件 / 6339 行；测试 98 passed；注册表静态工具 6 个，原生兜底工具 17 个（条件触发，见第 3 节）。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -234,6 +234,8 @@
 环境变量覆盖（前缀 `AGENT_*`）：
 
 `AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
+
+- `.env.local` 自动加载：`load_config()` 启动时读取当前目录与工作区的 `.env.local`，仅解析 `KEY=VALUE` 行（注释/空行/带 `export` 前缀的行跳过）；只补缺省变量，已存在的环境变量优先不覆盖；文件缺失或读取失败静默跳过，不引入 `python-dotenv` 依赖。
 
 ---
 
