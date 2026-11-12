@@ -22,6 +22,8 @@ scheduler_enabled: true        # 控制台/守护进程轮询 cron 定时任务
 scheduler_interval: 30         # 调度轮询间隔（秒）
 max_steps: 12
 port: 8765
+auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
+                                 # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可
 
 # 模型供给：豆包 App 云电脑当前既没有 API key，也没有暴露 model.complete 桥。
 # 平台开放桥后可用 provider: host；否则本地跑用 mock（确定性桩，不产生真实推理）。

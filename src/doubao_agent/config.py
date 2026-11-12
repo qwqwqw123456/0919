@@ -57,6 +57,7 @@ class Config:
     scheduler_interval: float = 30.0   # 调度轮询间隔（秒）
     max_steps: int = 12
     port: int = DEFAULT_PORT
+    auth_token: str = ""               # 控制台 /api 鉴权令牌；为空表示不鉴权（仅限本机）
     model: dict[str, Any] = field(default_factory=dict)
     bridge: dict[str, Any] = field(default_factory=dict)
     embedding: dict[str, Any] = field(default_factory=dict)  # 宿主 embedding 能力，默认自动探测
@@ -137,6 +138,7 @@ def load_config(path: str | Path | None = None) -> Config:
             cfg.planning_enabled = bool(planning.get("enabled", cfg.planning_enabled))
         cfg.max_steps = int(data.get("max_steps", cfg.max_steps))
         cfg.port = int(data.get("port", cfg.port))
+        cfg.auth_token = str(data.get("auth_token", cfg.auth_token) or "")
         cfg.model = dict(data.get("model") or _default_model())
         cfg.bridge = dict(data.get("bridge") or {})
         cfg.embedding = dict(data.get("embedding") or {})
@@ -153,6 +155,7 @@ def load_config(path: str | Path | None = None) -> Config:
 
     # Environment overrides win, so the cloud desktop can inject config at runtime.
     cfg.port = int(os.environ.get("AGENT_PORT", cfg.port))
+    cfg.auth_token = os.environ.get("AGENT_AUTH_TOKEN", cfg.auth_token)
     cfg.permission_mode = os.environ.get("AGENT_PERMISSION_MODE", cfg.permission_mode)
     cfg.script_risk = os.environ.get("AGENT_SCRIPT_RISK", cfg.script_risk)
     if os.environ.get("AGENT_SCRIPT_MAX_CPU"):

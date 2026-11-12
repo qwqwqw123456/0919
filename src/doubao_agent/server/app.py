@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import time
 from contextlib import asynccontextmanager
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
 from ..runtime import Runtime
@@ -96,6 +97,36 @@ def create_app(config: Config) -> FastAPI:
             await runtime.aclose()
 
     app = FastAPI(title="Doubao Agent Console", lifespan=lifespan)
+
+    auth_token = (config.auth_token or "").strip()
+
+    @app.middleware("http")
+    async def require_token(request, call_next):
+        """配置了 auth_token 时，所有 /api/* 需携带令牌。
+
+        令牌可来自 X-Agent-Token、Authorization: Bearer、查询参数 ?token= 或 cookie；
+        用查询参数通过一次后会种下 HttpOnly cookie，方便浏览器直接打开控制台。
+        静态页本身不拦，页面里由 JS 从 localStorage 读取令牌。
+        """
+        if not auth_token or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        bearer = request.headers.get("authorization", "")
+        if bearer.lower().startswith("bearer "):
+            bearer = bearer[7:]
+        provided = (
+            request.headers.get("x-agent-token")
+            or bearer
+            or request.query_params.get("token", "")
+            or request.cookies.get("agent_token", "")
+        )
+        if not hmac.compare_digest(provided, auth_token):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        response = await call_next(request)
+        if request.query_params.get("token"):
+            response.set_cookie(
+                "agent_token", auth_token, httponly=True, samesite="strict"
+            )
+        return response
 
     def rt() -> Runtime:
         return state["runtime"]

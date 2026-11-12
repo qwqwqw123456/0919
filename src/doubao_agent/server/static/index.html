@@ -83,8 +83,13 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let current = null;
+const TOKEN = new URLSearchParams(location.search).get('token')
+  || localStorage.getItem('agent_token') || '';
+if (TOKEN) localStorage.setItem('agent_token', TOKEN);
 
 async function getJSON(url, options) {
+  options = options || {};
+  if (TOKEN) options.headers = Object.assign({}, options.headers, {'X-Agent-Token': TOKEN});
   const res = await fetch(url, options);
   if (!res.ok) throw new Error(await res.text());
   return res.json();

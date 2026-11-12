@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from .config import Config, load_config
+from .core.audit import AuditLog
 from .core.memory import KINDS as MEMORY_KINDS
 from .runtime import Runtime
 from .types import ToolCall, ToolSpec
@@ -46,6 +47,29 @@ def _print_event(event: dict[str, Any]) -> None:
 def _usage_line(result: dict[str, Any]) -> str:
     usage = result.get("usage") or {}
     return f"调用={usage.get('calls', 0)} tokens={usage.get('total_tokens', 0)}"
+
+
+def _audit_command(args: argparse.Namespace, cfg: Config) -> int:
+    log = AuditLog(cfg.runs_dir)
+    if args.action == "sessions":
+        ids = log.sessions()
+        if not ids:
+            print("（暂无审计记录）")
+            return 0
+        for session_id in ids:
+            print(session_id)
+        return 0
+
+    targets = [args.session] if args.session else log.sessions()
+    if not targets:
+        print("（暂无审计记录）")
+        return 0
+    failed = 0
+    for session_id in targets:
+        ok, count = log.verify(session_id)
+        print(f"{'OK  ' if ok else 'FAIL'}\t{session_id}\t{count} 条")
+        failed += 0 if ok else 1
+    return 1 if failed else 0
 
 
 def _daemon_command(args: argparse.Namespace, cfg: Config) -> int:
@@ -447,6 +471,10 @@ def main(argv: list[str] | None = None) -> int:
     daemon_parser.add_argument("action", choices=["start", "stop", "status"])
     daemon_parser.add_argument("--port", type=int, default=None)
 
+    audit_parser = sub.add_parser("audit", help="审计：校验哈希链 / 列出有审计的会话")
+    audit_parser.add_argument("action", nargs="?", choices=["verify", "sessions"], default="verify")
+    audit_parser.add_argument("session", nargs="?", default=None, help="只校验指定会话")
+
     args, extra = parser.parse_known_args(argv)
     if extra and args.cmd in ("memory", "knowledge"):
         # argparse 的已知怪癖：可选参数在前时，位置参数会落进 extra。
@@ -458,6 +486,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "daemon":
         return _daemon_command(args, cfg)
+
+    if args.cmd == "audit":
+        return _audit_command(args, cfg)
 
     if args.cmd == "serve":
         try:

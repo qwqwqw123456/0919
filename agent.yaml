@@ -18,6 +18,7 @@ scheduler_enabled: true
 scheduler_interval: 30
 max_steps: 12
 port: 8765
+auth_token: ""
 
 # 真模型推理：云电脑当前没有暴露 model.complete 桥，也没有 API key。
 # 平台开放桥（注入 AGENT_BRIDGE_URL）后改回 provider: host；
