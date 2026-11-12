@@ -203,6 +203,7 @@
 ## 12. 备注口径
 
 - **动态发现，不写死清单**：MCP / API / 原生能力在启动或刷新时由对应通道发现；本清单只登记代码内静态存在的工具与通道形态。
+- **宿主桥契约**：`GET {bridge.url}/capabilities` 返回 `{capabilities:[{name,description,input_schema,risk}]}`；`POST {bridge.url}/invoke`，body `{capability,payload}`，鉴权头 `Authorization: Bearer {token}`。地址/令牌由 `AGENT_BRIDGE_URL` / `AGENT_BRIDGE_TOKEN` 注入；地址留空时不建桥，模型退回 mock。
 - **脚本通道边界**：`run_python` / `run_shell` 的 `cwd` 默认工作区，可由参数指定；风险等级由 `script_risk` 配置，经权限门管控。
 - **规划模式**：入口单次规划输出严格 JSON，三种模式 `script`（合并脚本）/ `tools`（分步工具）/ `answer`（直接回答）；解析失败回退常规逐步循环。
 - **并行协同**：`Coordinator` 一次模型拆解为 2~5 个子任务，`Runtime.spawn_agent()` 为每个子任务建独立 Agent（共享注册表/模型/策略/记忆/配方/计量，独立取消信号与会话）；子任务异常转 `failed`，不拖垮整批。

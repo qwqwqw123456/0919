@@ -37,13 +37,16 @@ model:
   # model: doubao-1-5-pro-32k
   # temperature: 0.2
 
-# 豆包宿主原生能力桥：自动发现全部原生能力（浏览器/桌面/通知/剪贴板/媒体/模型推理…）
-# 地址由宿主注入 AGENT_BRIDGE_URL；注意 18080 是云电脑的 HTTP 代理，不是桥。
+# 豆包宿主原生能力桥：自动发现全部原生能力（浏览器/桌面/通知/剪贴板/媒体/模型推理…）。
+# 契约：GET {url}/capabilities 返回 {capabilities:[{name,description,input_schema,risk}]}；
+#       POST {url}/invoke，body {capability,payload}，Authorization: Bearer {token}。
+# 运行时由环境变量注入：AGENT_BRIDGE_URL（地址，注入后自动启用）、AGENT_BRIDGE_TOKEN（鉴权）。
+# 注意 18080 是云电脑的 HTTP 代理，不是桥；url 留空时不建桥，模型退回本地 mock，不影响运行。
 bridge:
   enabled: true
-  url: ""                            # 例：http://127.0.0.1:<port>/host
+  url: ""
   token: ""
-  capabilities_path: /capabilities   # 返回 {capabilities:[{name,description,input_schema,risk}]}
+  capabilities_path: /capabilities
   fallback: true                     # 宿主无清单时，退回内置浏览器/桌面工具集
 
 mcp_servers:
