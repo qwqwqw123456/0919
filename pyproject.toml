@@ -1,0 +1,13 @@
+[project]
+name = "hostagent"
+version = "0.1.0"
+description = "宿主契约驱动的 AI Agent 运行时"
+requires-python = ">=3.10"
+dependencies = ["openpyxl>=3.1", "python-pptx>=0.6.23"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pyyaml>=6.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
