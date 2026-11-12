@@ -91,7 +91,13 @@ def load_config(path: str | Path | None = None) -> Config:
     cfg_path = Path(path or os.environ.get("DOUBAO_AGENT_CONFIG", "/workspace/agent.yaml"))
 
     if cfg_path.exists():
-        data = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
+        try:
+            data = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
+        except (yaml.YAMLError, OSError):
+            # 坏配置不能拖垮启动：回退默认配置，其余渠道照常工作。
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
         cfg.workspace = Path(data.get("workspace", cfg.workspace))
         cfg.runs_dir = Path(data.get("runs_dir", cfg.workspace / "runs"))
         cfg.db_path = Path(data.get("db_path", cfg.workspace / ".agent" / "agent.db"))

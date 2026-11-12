@@ -26,11 +26,12 @@ class HttpHostBridge:
         token: str | None = None,
         capabilities_path: str = "/capabilities",
         timeout: float = 120.0,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self.url = url.rstrip("/")
         self.token = token
         self.capabilities_path = capabilities_path
-        self._client = httpx.AsyncClient(timeout=timeout, trust_env=True)
+        self._client = client or httpx.AsyncClient(timeout=timeout, trust_env=True)
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
