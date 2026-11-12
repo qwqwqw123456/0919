@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 38 个 Python 文件 / 4957 行；测试 46 passed；注册表静态工具 6 个，原生兜底工具 17 个（条件触发，见第 3 节）。
+> 实跑基线：`src/` 下 39 个 Python 文件 / 5263 行；测试 68 passed；注册表静态工具 6 个，原生兜底工具 17 个（条件触发，见第 3 节）。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -16,6 +16,7 @@
 | Agent 内核 | `Agent.run()` 规划-执行-观察-反思主循环 | 单次入口规划（可选）→ 工具执行 → 结果归一化 → 记忆/配方沉淀 |
 | 能力注册表 | `CapabilityRegistry` 聚合多通道工具 | 上层只认 `ToolSpec`，不关心工具来自 MCP / API / 浏览器 / 桌面 / 原生 / 脚本 / 技能 / 知识 |
 | 模型供给 | `host / openai / mock` 三档 Provider | 统一 `complete(messages, tools) -> {content, tool_calls, usage}` |
+| 知识向量 | 可选宿主 embedding（`BridgeEmbedding`） | 桥清单暴露 `embed` 能力才启用；否则知识库保持关键词/混合检索，不伪造向量 |
 | 持久化 | SQLite + JSONL 审计 | 记忆 / 会话与检查点 / 知识库 / 配方 / 调度，断连可续跑 |
 
 ---
@@ -32,7 +33,7 @@
 | `native` 原生 | `sources/native.py` | 宿主 `/capabilities` 清单动态发现 | 清单声明，否则按名称关键词推断 | 桥不可用时返回空；桥存在但清单为空且 `fallback=true` 时挂浏览器/桌面兜底目录 |
 | `browser` 浏览器 | `sources/browser.py` | 兜底工具目录（9 个） | 只读 L0 / 可逆 L1 | 仅在原生通道走兜底目录时注册；实际执行交宿主桥 |
 | `desktop` 桌面 | `sources/desktop.py` | 兜底工具目录（8 个） | 只读 L0 / 可逆 L1 | 同上 |
-| `mcp` | `sources/mcp.py` | MCP stdio / SSE / Streamable HTTP，工具自描述 | 按名称关键词推断 | 工具由配置的 MCP Server 启动时发现，代码不写死清单 |
+| `mcp` | `sources/mcp.py` | MCP stdio / SSE / Streamable HTTP，工具自描述 | 按名称关键词推断 | 工具由配置的 MCP Server 启动时发现，代码不写死清单；未配置 `mcp_servers` 且 `mcp_auto_discover`（默认 true）时，启动探测 `http://127.0.0.1:8091/mcp`，JSON-RPC `initialize` 拿到 `result` 才接入，不可达跳过不报错 |
 | `api` | `sources/http_api.py` | OpenAPI 文档或声明式 JSON → 动态生成工具 | 文档声明，否则按名称关键词推断 | 工具由配置的 API 规格启动时发现 |
 
 ---
@@ -45,7 +46,7 @@
 | --- | --- | --- | --- | --- |
 | `script.run_python` | builtin | L1 | `code:str`，可选 `cwd`、`timeout` | 执行 Python 代码，print 输出关键结果 |
 | `script.run_shell` | builtin | L1 | `command:str`，可选 `cwd`、`timeout` | 执行非交互 bash 命令 |
-| `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4` | 关键词 + 字符 bigram 混合检索；接 embedding 后切余弦向量 |
+| `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4` | 通道内走异步 `asearch`；有 `embed`/`aembed` 时切余弦向量，异步 embedding 失败自动退回关键词 + 字符 bigram 混合检索；分块向量按文本 sha1 缓存 |
 | `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块 |
 | `skill.read` | skill | L0 | `name:str` | 阅读指定技能完整说明与资源清单（渐进式加载） |
 | `skill.text-stats` | skill | L0 | 见技能 `input_schema` | 示例可执行技能，入口 `skills/text-stats/main.py`，统计字符/中文/词/行/高频词 |
@@ -59,7 +60,7 @@
 
 ### 3.2 动态工具（不在代码内枚举）
 
-- MCP 工具：由 `agent.yaml` 的 `mcp_servers` 启动对应 Server 后发现。
+- MCP 工具：由 `agent.yaml` 的 `mcp_servers` 启动对应 Server 后发现；未配置时启动自动探测宿主标准 MCP `127.0.0.1:8091/mcp`（见第 2 节），探测不到则跳过。
 - API 工具：由 `api_sources` 指向的 OpenAPI / 声明式规格生成。
 - 可执行技能：扫描 `skills_dir/*/SKILL.md`，有 `entry` 的注册为 `skill.<name>`。
 
@@ -67,7 +68,7 @@
 
 ## 4. CLI 命令（`cli.py`，14 个子命令）
 
-全局选项：`--config <路径>`（默认 `/workspace/agent.yaml`，亦可由环境变量 `DOUBAO_AGENT_CONFIG` 指定）。
+全局选项：`--config <路径>`；配置路径依次取 `--config` → 环境变量 `DOUBAO_AGENT_CONFIG` → `<workspace>/agent.yaml`，不存在时回退 legacy `/workspace/agent.yaml`。`workspace` 默认取 `AGENT_WORKSPACE` 或当前目录。
 
 | 子命令 | 位置参数 / 选项 | 作用 |
 | --- | --- | --- |
@@ -186,24 +187,34 @@
 
 统一返回 `{content, tool_calls, usage}`；空 `choices` 或缺 `message` 回退空结果，不崩溃。
 
+### 10.1 知识向量供给（`providers/embedding.py`）
+
+- `BridgeEmbedding(bridge, capability="embed")`：桥非空且 `embedding.enabled`（默认 true）时装配；`available()` 查桥能力清单是否含该能力名（结果缓存），不含则不启用。
+- `embed(text)` 调桥 `invoke(capability, {"input": text})`；`_vectors_of` 兼容 `[float]` / `{"embedding"}` / `{"vectors":[[...]]}` / `{"data":[{"embedding"}]}` / 嵌套 `result`；解析不出抛 `ValueError`，不本地伪造向量。
+- 不可用或向量解析失败时，知识库退回关键词/混合检索；向量函数为异步 `aembed`，供 `KnowledgeStore.asearch` 调用。
+
+> 当前云电脑现状：既无 API key，也未暴露 `model.complete` 桥与 `embed` 能力；本机运行配置 `provider: mock`、桥关闭，知识库走混合检索。平台开放桥后由 `AGENT_BRIDGE_URL` / `AGENT_BRIDGE_TOKEN` 注入启用。
+
 ---
 
 ## 11. 配置项与环境变量
 
 配置文件（`agent.yaml`，模板 `agent.example.yaml`）字段：
 
-`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`port`、`model`、`bridge`、`auto_approve`、`mcp_servers`、`api_sources`。
+`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`port`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
 环境变量覆盖（前缀 `AGENT_*`）：
 
-`AGENT_PORT`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_SKILLS_DIR`、`AGENT_CONTEXT_LIMIT`、`AGENT_DB_PATH`、`AGENT_RUNS_DIR`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI 兜底 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`。
+`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI 兜底 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`。
 
 ---
 
 ## 12. 备注口径
 
 - **动态发现，不写死清单**：MCP / API / 原生能力在启动或刷新时由对应通道发现；本清单只登记代码内静态存在的工具与通道形态。
+- **MCP 自动探测**：未配置 `mcp_servers` 且 `mcp_auto_discover=true`（默认）时，启动发 JSON-RPC `initialize` 探测 `http://127.0.0.1:8091/mcp`；拿到 `result` 才追加名为 `host` 的 HTTP MCP Server，探测失败 best-effort 跳过、不报错；可用 `mcp_auto_discover: false` 或环境变量 `AGENT_MCP_AUTO_DISCOVER` 关闭。
 - **宿主桥契约**：`GET {bridge.url}/capabilities` 返回 `{capabilities:[{name,description,input_schema,risk}]}`；`POST {bridge.url}/invoke`，body `{capability,payload}`，鉴权头 `Authorization: Bearer {token}`。地址/令牌由 `AGENT_BRIDGE_URL` / `AGENT_BRIDGE_TOKEN` 注入；地址留空时不建桥，模型退回 mock。
+- **embedding 兜底**：宿主桥未暴露 `embed` 能力、或向量解析失败时，知识库不伪造向量，退回关键词/混合检索；向量能力名可由 `embedding.capability` 或 `AGENT_EMBEDDING_CAPABILITY` 覆盖。
 - **脚本通道边界**：`run_python` / `run_shell` 的 `cwd` 默认工作区，可由参数指定；风险等级由 `script_risk` 配置，经权限门管控。
 - **规划模式**：入口单次规划输出严格 JSON，三种模式 `script`（合并脚本）/ `tools`（分步工具）/ `answer`（直接回答）；解析失败回退常规逐步循环。
 - **并行协同**：`Coordinator` 一次模型拆解为 2~5 个子任务，`Runtime.spawn_agent()` 为每个子任务建独立 Agent（共享注册表/模型/策略/记忆/配方/计量，独立取消信号与会话）；子任务异常转 `failed`，不拖垮整批。
