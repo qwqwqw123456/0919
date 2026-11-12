@@ -349,3 +349,38 @@ async def test_tool_artifacts_are_registered(tmp_path) -> None:
     paths = [row["path"] for row in sessions.artifacts(result["session_id"])]
     assert str(tmp_path / "runs" / result["session_id"] / "report.txt") in paths
     assert all(not path.endswith("audit.jsonl") for path in paths)
+
+
+async def test_artifact_scan_is_incremental_and_deduped(tmp_path) -> None:
+    registry = await _registry(FakeSource())
+    db = tmp_path / "agent.db"
+    sessions = SessionStore(db)
+    agent = Agent(
+        registry=registry,
+        provider=MockProvider(),
+        policy=PermissionPolicy("auto"),
+        sessions=sessions,
+        audit=AuditLog(tmp_path / "runs"),
+        memory=MemoryStore(db),
+        max_steps=4,
+    )
+
+    session_id = "s-artifacts"
+    root = tmp_path / "runs" / session_id
+    (root / "nested").mkdir(parents=True)
+    (root / "first.txt").write_text("1", encoding="utf-8")
+    (root / "audit.jsonl").write_text("{}", encoding="utf-8")
+
+    agent._register_artifacts(session_id)
+    agent._register_artifacts(session_id)
+    paths = [row["path"] for row in sessions.artifacts(session_id)]
+    assert str(root / "first.txt") in paths
+    assert len(paths) == 1, "同一产物不应重复登记"
+
+    # 目录 mtime 未变时走缓存；新增嵌套文件后仍能被发现且不重复
+    (root / "nested" / "second.txt").write_text("2", encoding="utf-8")
+    agent._register_artifacts(session_id)
+    agent._register_artifacts(session_id)
+    paths = [row["path"] for row in sessions.artifacts(session_id)]
+    assert str(root / "nested" / "second.txt") in paths
+    assert len(paths) == 2

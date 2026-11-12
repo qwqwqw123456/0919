@@ -45,3 +45,22 @@ async def test_knowledge_source_tools(tmp_path) -> None:
         ToolCall(name="search", arguments={"query": "A 和 B 的关系"}, call_id="s")
     )
     assert search.ok is True and "A" in search.content
+
+
+def test_embedding_cache_avoids_reembedding_chunks(tmp_path) -> None:
+    from doubao_agent.core.knowledge import KnowledgeStore
+
+    calls: list[str] = []
+
+    def embed(text: str) -> list[float]:
+        calls.append(text)
+        return [1.0, float(len(text))]
+
+    store = KnowledgeStore(tmp_path / "k.db", embed=embed)
+    store.add_text("制度", "第一段说明。\n\n第二段说明。")
+
+    store.search("第一段")
+    first = len(calls)
+    store.search("第二段")
+    # 第二次检索只多算 query 向量，分块向量命中缓存
+    assert len(calls) == first + 1

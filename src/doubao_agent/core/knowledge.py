@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -25,6 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 
 _CHUNK_SIZE = 500   # 目标块长（字符）
 _SENTENCE_RE = re.compile(r"[^。！？；!?;\n]+[。！？；!?;]?")
+_VEC_CACHE_LIMIT = 20000   # 分块向量缓存条数上限（按文本摘要键控）
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]")
 
@@ -81,6 +83,7 @@ class KnowledgeStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.embed = embed
         self._lock = threading.Lock()
+        self._vec_cache: dict[str, tuple[float, ...]] = {}
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
@@ -126,8 +129,7 @@ class KnowledgeStore:
             query_vec = self.embed(query)
             scored: list[tuple[float, sqlite3.Row]] = []
             for row in rows:
-                chunk_vec = self.embed(row["text"])
-                scored.append((self._cosine(query_vec, chunk_vec), row))
+                scored.append((self._cosine(query_vec, self._embed_chunk(row["text"])), row))
         else:
             scored = [(_score_chunk(query, row["text"]), row) for row in rows]
 
@@ -154,8 +156,19 @@ class KnowledgeStore:
                 break
         return picked
 
+    def _embed_chunk(self, text: str) -> tuple[float, ...]:
+        """分块向量按文本摘要缓存，避免每次检索重复向量化。"""
+        key = hashlib.sha1(text.encode("utf-8")).hexdigest()
+        vec = self._vec_cache.get(key)
+        if vec is None:
+            vec = tuple(self.embed(text))
+            if len(self._vec_cache) >= _VEC_CACHE_LIMIT:
+                self._vec_cache.clear()
+            self._vec_cache[key] = vec
+        return vec
+
     @staticmethod
-    def _cosine(a: list[float], b: list[float]) -> float:
+    def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
         if not a or not b:
             return 0.0
         dot = sum(x * y for x, y in zip(a, b))
