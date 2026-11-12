@@ -16,6 +16,7 @@ class OpenAICompatProvider:
         model: str = "gpt-4o-mini",
         temperature: float = 0.2,
         extra_headers: dict[str, str] | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self.model = model
         self.temperature = temperature
@@ -23,7 +24,7 @@ class OpenAICompatProvider:
         headers = {"Content-Type": "application/json", **(extra_headers or {})}
         if key:
             headers["Authorization"] = f"Bearer {key}"
-        self._client = httpx.AsyncClient(
+        self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"), headers=headers, timeout=120.0, trust_env=True
         )
 

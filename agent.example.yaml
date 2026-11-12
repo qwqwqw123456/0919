@@ -25,20 +25,21 @@ port: 8765
 auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
                                  # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可
 
-# 模型供给：豆包 App 云电脑当前既没有 API key，也没有暴露 model.complete 桥。
-# 平台开放桥后可用 provider: host；否则本地跑用 mock（确定性桩，不产生真实推理）。
+# 模型供给（三选一）：
+#   1) host  —— 平台提供 model.complete 桥时用；无桥会自动退回 mock
+#   2) openai —— 任意 OpenAI 兼容接口（推荐用于 CPU 云电脑）；三个值必填：
+#        base_url     接口根地址，需包含版本段，如 https://xxx/v1
+#        model        模型名或接入点 ID
+#        api_key_env  存放密钥的环境变量名（不要写死 api_key）
+#   3) mock  —— 确定性桩，不产生真实推理，仅用于本地联通性测试
 model:
-  provider: host                 # host | openai | mock
-  capability: model.complete     # 宿主暴露的推理能力名
-  model: ""                      # 可选：指定豆包模型名，留空用宿主默认
-  temperature: 0.2
-
-  # 若走外部 OpenAI 兼容接口（需要 key），改为下面这段：
+  provider: mock                 # host | openai | mock
+  # 改为 openai 时填下面四项：
   # provider: openai
-  # base_url: https://ark.cn-beijing.volces.com/api/v3
-  # api_key_env: ARK_API_KEY
-  # model: doubao-1-5-pro-32k
-  # temperature: 0.2
+  # base_url: https://your-endpoint.example.com/v1
+  # model: your-model-name
+  # api_key_env: OPENAI_API_KEY  # 启动前 export，例如 export OPENAI_API_KEY=sk-xxx
+  temperature: 0.2
 
 # 通用 REST 宿主桥（目标形态，非当前云电脑现状）：
 # 云电脑现状是“能力走 MCP + RSA 签名 REST，推理走上层”，没有这套端点。

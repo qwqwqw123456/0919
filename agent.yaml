@@ -20,11 +20,15 @@ max_steps: 12
 port: 8765
 auth_token: ""
 
-# 真模型推理：云电脑当前没有暴露 model.complete 桥，也没有 API key。
-# 平台开放桥（注入 AGENT_BRIDGE_URL）后改回 provider: host；
-# 或提供 OpenAI 兼容 endpoint + key 时按 agent.example.yaml 的注释配置。
+# 真模型推理：云电脑为 CPU 环境，不自建模型，走外部 OpenAI 兼容接口。
+# 填好 base_url / model 后把 provider 改成 openai，并按 api_key_env 指定的变量名注入密钥
+# （建议在启动前 export，不要写进本文件——agent.yaml 是入库文件）。
 model:
-  provider: mock
+  provider: mock                 # 填好下面三项后改为 openai
+  # base_url: https://your-endpoint.example.com/v1
+  # model: your-model-name
+  # api_key_env: OPENAI_API_KEY
+  temperature: 0.2
 
 bridge:
   # 云电脑现状：能力走 MCP + RSA 签名 REST，推理走上层，

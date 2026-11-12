@@ -34,8 +34,20 @@ def build_provider(cfg: dict[str, Any], bridge: Any = None) -> ModelProvider:
     if provider in ("openai", "openai-compatible", "openai_compat"):
         from .openai_compat import OpenAICompatProvider
 
+        base_url = str((cfg or {}).get("base_url") or "").strip()
+        if not base_url:
+            # 没有地址就不猜：避免误连 api.openai.com 产生意外费用。
+            import sys
+
+            print(
+                "[warn] model.provider=openai 但未配置 model.base_url，已退回 mock",
+                file=sys.stderr,
+            )
+            from .mock import MockProvider
+
+            return MockProvider(script=cfg.get("script") if cfg else None)
         return OpenAICompatProvider(
-            base_url=cfg.get("base_url", "https://api.openai.com/v1"),
+            base_url=base_url,
             api_key=cfg.get("api_key", ""),
             api_key_env=cfg.get("api_key_env", "OPENAI_API_KEY"),
             model=cfg.get("model", "gpt-4o-mini"),
