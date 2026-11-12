@@ -985,12 +985,13 @@ async def test_tool_artifacts_are_registered(tmp_path) -> None:
     assert all(not path.endswith("audit.jsonl") for path in paths)
 
 
-def test_agent_yaml_enables_policy_and_planning() -> None:
+def test_example_config_enables_policy_and_planning() -> None:
     from pathlib import Path
 
     from doubao_agent.config import load_config
 
-    cfg = load_config(Path(__file__).resolve().parents[1] / "agent.yaml")
+    # agent.yaml 是本地部署文件（gitignore），测试以仓库内的模板为准。
+    cfg = load_config(Path(__file__).resolve().parents[1] / "agent.example.yaml")
     assert cfg.planning_enabled is True
     assert cfg.auto_approve and cfg.auto_approve[0]["tool"] == "send_message"
 
