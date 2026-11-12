@@ -24,6 +24,11 @@ evolution:                      # 技能自进化：用量遥测 + 生命周期�
 context_limit: 40              # 单次请求最多携带的消息条数（超出按 user 边界裁剪）
 scheduler_enabled: true        # 控制台/守护进程轮询 cron 定时任务
 scheduler_interval: 30         # 调度轮询间隔（秒）
+watch_enabled: false           # 文件变更监听（默认关）；开启后轮询目录快照，变更广播 file_change 事件
+watch_dirs: []                 # 监听目录，空=工作区；相对路径基于工作区
+watch_interval: 10             # 目录快照轮询间隔（秒）
+watch_task: ""                 # 变更触发任务模板，占位符 {path}/{event}；空=只广播事件不起任务
+watch_suffixes: []            # 只监听这些后缀（如 [".md",".txt"]），空=全部
 max_steps: 12
 max_calls: 0        # 单次运行模型调用预算，0=不限；接真实模型时建议设上限
 max_tokens: 0       # 单次运行 token 预算，0=不限

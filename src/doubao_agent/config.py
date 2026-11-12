@@ -93,6 +93,11 @@ class Config:
     context_limit: int = 40            # 单次请求最多携带的消息条数，超出按 user 边界裁剪
     scheduler_enabled: bool = True     # 控制台/守护进程是否轮询 cron 调度
     scheduler_interval: float = 30.0   # 调度轮询间隔（秒）
+    watch_enabled: bool = False        # 文件变更监听开关（默认关，避免默认扫工作区起任务）
+    watch_dirs: list[str] = field(default_factory=list)  # 监听目录，空=工作区
+    watch_interval: float = 10.0       # 目录快照轮询间隔（秒）
+    watch_task: str = ""               # 变更触发任务模板，占位符 {path}/{event}；空=只广播事件不起任务
+    watch_suffixes: list[str] = field(default_factory=list)  # 只监听这些后缀，空=全部
     max_steps: int = 12
     max_calls: int = 0                 # 单次运行模型调用预算，0 表示不限
     max_tokens: int = 0                # 单次运行 token 预算，0 表示不限
@@ -189,6 +194,11 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.context_limit = max(4, int(data.get("context_limit", cfg.context_limit)))
         cfg.scheduler_enabled = bool(data.get("scheduler_enabled", cfg.scheduler_enabled))
         cfg.scheduler_interval = max(5.0, float(data.get("scheduler_interval", cfg.scheduler_interval)))
+        cfg.watch_enabled = bool(data.get("watch_enabled", cfg.watch_enabled))
+        cfg.watch_dirs = [str(x) for x in (data.get("watch_dirs") or [])]
+        cfg.watch_interval = max(2.0, float(data.get("watch_interval", cfg.watch_interval)))
+        cfg.watch_task = str(data.get("watch_task", cfg.watch_task) or "")
+        cfg.watch_suffixes = [str(x) for x in (data.get("watch_suffixes") or [])]
         planning = data.get("planning") or {}
         if isinstance(planning, dict):
             cfg.planning_enabled = bool(planning.get("enabled", cfg.planning_enabled))
@@ -223,6 +233,12 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.scheduler_enabled = os.environ["AGENT_SCHEDULER_ENABLED"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_SCHEDULER_INTERVAL"):
         cfg.scheduler_interval = max(5.0, float(os.environ["AGENT_SCHEDULER_INTERVAL"]))
+    if os.environ.get("AGENT_WATCH_ENABLED") is not None:
+        cfg.watch_enabled = os.environ["AGENT_WATCH_ENABLED"].lower() in ("1", "true", "yes", "on")
+    if os.environ.get("AGENT_WATCH_INTERVAL"):
+        cfg.watch_interval = max(2.0, float(os.environ["AGENT_WATCH_INTERVAL"]))
+    if os.environ.get("AGENT_WATCH_TASK") is not None:
+        cfg.watch_task = os.environ["AGENT_WATCH_TASK"]
     if os.environ.get("AGENT_EVOLUTION") is not None:
         cfg.evolution_enabled = os.environ["AGENT_EVOLUTION"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_RECORD_RECIPES") is not None:

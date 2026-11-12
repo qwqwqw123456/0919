@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
+from ..core.watcher import _run_watcher
 from ..runtime import Runtime
 from ..types import ToolSpec
 
@@ -122,8 +123,11 @@ def create_app(config: Config) -> FastAPI:
         runtime = await Runtime.build(config)
         state["runtime"] = runtime
         scheduler_task = None
+        watcher_task = None
         if runtime.config.scheduler_enabled:
             scheduler_task = asyncio.create_task(_run_scheduler(runtime, bus))
+        if runtime.config.watch_enabled:
+            watcher_task = asyncio.create_task(_run_watcher(runtime, bus))
         try:
             yield
         finally:
@@ -131,6 +135,8 @@ def create_app(config: Config) -> FastAPI:
                 task.cancel()
             if scheduler_task is not None:
                 scheduler_task.cancel()
+            if watcher_task is not None:
+                watcher_task.cancel()
             await runtime.aclose()
 
     app = FastAPI(title="Doubao Agent Console", lifespan=lifespan)
