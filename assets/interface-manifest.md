@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 39 个 Python 文件 / 5263 行；测试 68 passed；注册表静态工具 6 个，原生兜底工具 17 个（条件触发，见第 3 节）。
+> 实跑基线：`src/` 下 41 个 Python 文件 / 5956 行；测试 85 passed；注册表静态工具 6 个，原生兜底工具 17 个（条件触发，见第 3 节）。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -17,7 +17,7 @@
 | 能力注册表 | `CapabilityRegistry` 聚合多通道工具 | 上层只认 `ToolSpec`，不关心工具来自 MCP / API / 浏览器 / 桌面 / 原生 / 脚本 / 技能 / 知识 |
 | 模型供给 | `host / openai / mock` 三档 Provider | 统一 `complete(messages, tools) -> {content, tool_calls, usage}` |
 | 知识向量 | 可选宿主 embedding（`BridgeEmbedding`） | 桥清单暴露 `embed` 能力才启用；否则知识库保持关键词/混合检索，不伪造向量 |
-| 持久化 | SQLite + JSONL 审计 | 记忆 / 会话与检查点 / 知识库 / 配方 / 调度，断连可续跑 |
+| 持久化 | SQLite + JSONL 审计 | 三层记忆（工作记忆 / 长期经验 / 知识域）、会话与检查点、配方、调度，断连可续跑 |
 
 ---
 
@@ -29,7 +29,7 @@
 | --- | --- | --- | --- | --- |
 | `builtin` 脚本 | `sources/script.py` | 代码即动作：Python / bash 非交互执行 | 可配（默认 L1） | `run_python` / `run_shell`；CPU 上限可选 RLIMIT_CPU；支持会话级取消 |
 | `skill` 技能 | `sources/skill.py` | `skills/<name>/SKILL.md`；可执行技能注册为工具，知识技能按需阅读 | 技能 frontmatter 声明，缺省 L1 | 入口限定在技能目录内；参数以 JSON 从 stdin 传入 |
-| `knowledge` 知识 | `sources/knowledge.py` | 长文档分块检索与回写 | search L0 / add L1 | 与短期记忆分工：知识记长文档，记忆记短事实/偏好/经验 |
+| `knowledge` 知识 | `sources/knowledge.py` | 长文档分块检索与回写 | search L0 / add L1 | 与短期记忆分工：知识记长文档，记忆记短事实/偏好/经验；文档可归属七个知识域之一 |
 | `native` 原生 | `sources/native.py` | 宿主 `/capabilities` 清单动态发现 | 清单声明，否则按名称关键词推断 | 桥不可用时返回空；桥存在但清单为空且 `fallback=true` 时挂浏览器/桌面兜底目录 |
 | `browser` 浏览器 | `sources/browser.py` | 兜底工具目录（9 个） | 只读 L0 / 可逆 L1 | 仅在原生通道走兜底目录时注册；实际执行交宿主桥 |
 | `desktop` 桌面 | `sources/desktop.py` | 兜底工具目录（8 个） | 只读 L0 / 可逆 L1 | 同上 |
@@ -47,7 +47,7 @@
 | `script.run_python` | builtin | L1 | `code:str`，可选 `cwd`、`timeout` | 执行 Python 代码，print 输出关键结果 |
 | `script.run_shell` | builtin | L1 | `command:str`，可选 `cwd`、`timeout` | 执行非交互 bash 命令 |
 | `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4` | 通道内走异步 `asearch`；有 `embed`/`aembed` 时切余弦向量，异步 embedding 失败自动退回关键词 + 字符 bigram 混合检索；分块向量按文本 sha1 缓存 |
-| `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块 |
+| `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块；域归属留空，由 CLI/API 显式指定 |
 | `skill.read` | skill | L0 | `name:str` | 阅读指定技能完整说明与资源清单（渐进式加载） |
 | `skill.text-stats` | skill | L0 | 见技能 `input_schema` | 示例可执行技能，入口 `skills/text-stats/main.py`，统计字符/中文/词/行/高频词 |
 
@@ -66,7 +66,7 @@
 
 ---
 
-## 4. CLI 命令（`cli.py`，14 个子命令）
+## 4. CLI 命令（`cli.py`，17 个子命令）
 
 全局选项：`--config <路径>`；配置路径依次取 `--config` → 环境变量 `DOUBAO_AGENT_CONFIG` → `<workspace>/agent.yaml`，不存在时回退 legacy `/workspace/agent.yaml`。`workspace` 默认取 `AGENT_WORKSPACE` 或当前目录。
 
@@ -82,7 +82,10 @@
 | `replay` | `recipe_id:int` | 按配方零模型重放 |
 | `memory` | `action`；`value?`；`--kind`；`--limit=20` | `list / add / search / forget / stats`；`--kind` 见第 9 节四类 |
 | `schedule` | `action`；`args*`；`--name` | `add / list / remove / enable / disable / run`；cron 5 段 |
-| `knowledge` | `action`；`value?`；`--title`；`--text`；`--limit=4` | `list / add / search / remove / stats` |
+| `knowledge` | `action`；`value?`；`--title`；`--text`；`--domain`；`--limit=4` | `list / add / search / remove / stats / domains`；`domains` 输出七域文档数 |
+| `state` | `[show\|set]`；`key?`；`value?` | 查看 / 修改第一层会话状态（工作记忆），字段见 9.1 |
+| `longterm` | `kind`；`[add\|list]`；`--date` 及各字段选项 | `lesson / observation / deviation` 三表增查，`stats` 输出计数 |
+| `audit` | `[verify\|sessions]`；`session?` | 重算哈希链校验审计；`sessions` 列出有审计的会话 |
 | `parallel` | `task`；`--subtasks a,b,c` | 并行协同；省略子任务则先由模型拆解 |
 | `serve` | `--port` | 启动本地控制台（uvicorn） |
 | `daemon` | `action`；`--port` | `start / stop / status`，子进程崩溃按退避重启 |
@@ -114,6 +117,8 @@
 | POST | `/api/schedules/{schedule_id}/toggle` | 启用 / 停用（`enabled`） |
 | POST | `/api/schedules/{schedule_id}/run` | 立即执行一次 |
 | GET | `/` | 控制台静态页 `server/static/index.html` |
+
+鉴权：配置了 `auth_token`（或 `AGENT_AUTH_TOKEN`）时，中间件保护全部 `/api/*`；令牌可来自 `X-Agent-Token` 头、`Authorization: Bearer`、`?token=` 查询参数或 cookie。带 `?token=` 访问一次会种下 HttpOnly cookie。未配置令牌时不鉴权（仅限本机使用）。
 
 ---
 
@@ -159,21 +164,37 @@
 
 ---
 
-## 9. 持久化存储（SQLite，9 张表）
+## 9. 持久化存储（SQLite，13 张表）
 
 | 表 | 所属模块 | 用途 |
 | --- | --- | --- |
 | `facts` | `core/memory.py` | 长期记忆四类：`preference` / `fact` / `experience` / `procedure`；按指纹去重加权 |
+| `working_state` | `core/working.py` | 第一层会话状态（单条例行 + 写入锁），字段见 9.1 |
+| `lessons` | `core/longterm.py` | 第二层萃取库：日期、事件、判断、结果、教训 |
+| `observations` | `core/longterm.py` | 第二层观察记录：日期、现象、观察、原因分析、后续动作 |
+| `deviations` | `core/longterm.py` | 第二层偏差档案：日期、预期、实际、偏差、原因、修正动作 |
 | `sessions` | `core/session.py` | 会话：任务、状态、结果、步数、时间戳 |
 | `messages` | `core/session.py` | 会话消息流水（JSON 载荷） |
 | `checkpoints` | `core/session.py` | 检查点：步骤与状态，断点续跑 |
 | `artifacts` | `core/session.py` | 会话产物路径登记 |
-| `documents` | `core/knowledge.py` | 知识库文档（标题、来源、时间） |
+| `documents` | `core/knowledge.py` | 知识库文档（标题、来源、`domain` 知识域、时间）；老库自动补列 |
 | `chunks` | `core/knowledge.py` | 文档分块（默认目标 500 字/块） |
 | `recipes` | `core/recipe.py` | 成功工具序列，可零模型重放 |
 | `schedules` | `core/scheduler.py` | cron 定时任务：表达式、任务、启用态、上次/下次运行 |
 
-审计为追加式哈希链 JSONL：`<runs_dir>/<session_id>/audit.jsonl`。
+审计为追加式哈希链 JSONL：`<runs_dir>/<session_id>/audit.jsonl`；写入前对 `token` / `password` / `secret` / `cookie` / `api_key` / `private_key` 及 `*_token`、`*_secret` 等字段递归脱敏为 `***`（`max_tokens` 等非凭据字段不误伤）。`audit verify` 重算整链，被篡改返回退出码 1。
+
+### 9.1 三层记忆体系
+
+| 层 | 载体 | 生命周期 | 读法 |
+| --- | --- | --- | --- |
+| 第一层 会话状态（工作记忆） | `working_state` 单条例行 | 每次会话开头读、结束时回写 | `Agent.run()` 入口调 `begin_session()`，状态渲染进系统提示，先读再开口；结束调 `end_session()` |
+| 第二层 长期经验 | `lessons` / `observations` / `deviations` 三表 | 跨会话累积 | `LongTermMemory` 增查；CLI `longterm`；偏差值可自动计算 |
+| 第三层 知识域 | `documents.domain` + `chunks` | 长期 | 七域固定编号 `01~07`：认知与思维 / 自我成长 / 财富与商业 / 人际与关系 / 行业与赛道 / 工具与参考 / 国家政策；检索可按域过滤，`domain_stats()` 出域索引 |
+
+- 工作记忆字段（16 项）：知识库、远程调用、我的名字、用户称呼、记忆点、上次会话日期、新点主题、离线时间线、工作流节点、初始化阶段、待回顾、暂停状态、写入锁、会话计数、时间戳、焦点线。
+- 写入锁：`locked()` 上下文置 `locked`，期间其它 `update()` 抛 `RuntimeError`，退出自动解锁；未知字段抛 `ValueError`。
+- 会话计数每次 `begin_session()` +1；`end_session(status, summary)` 写工作流节点、初始化阶段、待回顾（completed 时取回答摘要）或暂停状态（cancelled / paused）。
 
 ---
 
@@ -201,11 +222,11 @@
 
 配置文件（`agent.yaml`，模板 `agent.example.yaml`）字段：
 
-`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`port`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
+`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
 环境变量覆盖（前缀 `AGENT_*`）：
 
-`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI 兜底 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`。
+`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI 兜底 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL`。
 
 ---
 
@@ -215,7 +236,8 @@
 - **MCP 自动探测**：未配置 `mcp_servers` 且 `mcp_auto_discover=true`（默认）时，启动发 JSON-RPC `initialize` 探测 `http://127.0.0.1:8091/mcp`；拿到 `result` 才追加名为 `host` 的 HTTP MCP Server，探测失败 best-effort 跳过、不报错；可用 `mcp_auto_discover: false` 或环境变量 `AGENT_MCP_AUTO_DISCOVER` 关闭。
 - **宿主桥契约**：`GET {bridge.url}/capabilities` 返回 `{capabilities:[{name,description,input_schema,risk}]}`；`POST {bridge.url}/invoke`，body `{capability,payload}`，鉴权头 `Authorization: Bearer {token}`。地址/令牌由 `AGENT_BRIDGE_URL` / `AGENT_BRIDGE_TOKEN` 注入；地址留空时不建桥，模型退回 mock。
 - **embedding 兜底**：宿主桥未暴露 `embed` 能力、或向量解析失败时，知识库不伪造向量，退回关键词/混合检索；向量能力名可由 `embedding.capability` 或 `AGENT_EMBEDDING_CAPABILITY` 覆盖。
-- **脚本通道边界**：`run_python` / `run_shell` 的 `cwd` 默认工作区，可由参数指定；风险等级由 `script_risk` 配置，经权限门管控。
+- **脚本通道边界**：`run_python` / `run_shell` 的 `cwd` 必须落在工作区内（绝对路径或 `..` 越界一律拒绝），bash 以非登录方式执行；超时或取消按进程组整组回收；`returncode is None` 判失败不兜底 0；风险等级由 `script_risk` 配置，经权限门管控。
+- **三层记忆口径**：第一层会话状态单条例行 + 写入锁，入口先读后回写；第二层三张经验表跨会话累积；第三层七域作为知识库文档的域索引。三层与 `facts` 四类记忆并存，互不覆盖。
 - **规划模式**：入口单次规划输出严格 JSON，三种模式 `script`（合并脚本）/ `tools`（分步工具）/ `answer`（直接回答）；解析失败回退常规逐步循环。
 - **并行协同**：`Coordinator` 一次模型拆解为 2~5 个子任务，`Runtime.spawn_agent()` 为每个子任务建独立 Agent（共享注册表/模型/策略/记忆/配方/计量，独立取消信号与会话）；子任务异常转 `failed`，不拖垮整批。
 - **与旧体系差异**：本清单对应 `src/doubao_agent/` 新运行时；旧版 `scripts/` 子 Agent、主权 Skill CLI、宿主连接器白名单等形态在本工程代码内不存在，未登记。
