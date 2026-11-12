@@ -69,7 +69,12 @@ class CapabilityRegistry:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown tool: {call.name}")
         source, original = self._dispatch[key]
         return await source.call_tool(
-            ToolCall(name=original, arguments=call.arguments, call_id=call.call_id)
+            ToolCall(
+                name=original,
+                arguments=call.arguments,
+                call_id=call.call_id,
+                cancel_event=call.cancel_event,
+            )
         )
 
     async def cancel(self) -> None:

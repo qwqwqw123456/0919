@@ -1035,3 +1035,76 @@ async def test_policy_rule_matches_source_prefixed_tool_name() -> None:
     )
     assert decision.allowed is True
     assert decision.needs_approval is False
+
+
+async def test_script_cancel_is_per_call(tmp_path) -> None:
+    import asyncio
+
+    from doubao_agent.sources.script import ScriptSource
+
+    source = ScriptSource(tmp_path)
+    slow_event = asyncio.Event()
+
+    slow = asyncio.create_task(
+        source.call_tool(
+            ToolCall(
+                name="run_python",
+                arguments={"code": "import time; time.sleep(10)"},
+                call_id="slow",
+                cancel_event=slow_event,
+            )
+        )
+    )
+    await asyncio.sleep(0.3)
+
+    fast = await source.call_tool(
+        ToolCall(
+            name="run_python",
+            arguments={"code": "print(42)"},
+            call_id="fast",
+            cancel_event=asyncio.Event(),
+        )
+    )
+    assert fast.ok is True
+    assert "42" in fast.content
+
+    slow_event.set()
+    cancelled = await slow
+    assert cancelled.ok is False
+    assert cancelled.error == "cancelled"
+
+
+async def test_cancel_session_is_scoped_to_target(tmp_path) -> None:
+    from doubao_agent.config import Config
+    from doubao_agent.runtime import Runtime
+
+    cfg = Config(
+        workspace=tmp_path,
+        runs_dir=tmp_path / "runs",
+        db_path=tmp_path / "agent.db",
+        skills_dir=tmp_path / "skills",
+        scheduler_enabled=False,
+        model={"provider": "mock"},
+    )
+    runtime = await Runtime.build(cfg)
+    try:
+        result = await runtime.start_run("随便聊聊")
+        assert result["status"] == "completed"
+        assert runtime.running_sessions() == []
+
+        sid_a = runtime.sessions.create("A")
+        sid_b = runtime.sessions.create("B")
+        agent_a = runtime.spawn_agent()
+        agent_b = runtime.spawn_agent()
+        runtime._runs[sid_a] = agent_a
+        runtime._runs[sid_b] = agent_b
+
+        assert runtime.cancel_session(sid_a) is True
+        assert agent_a.cancel_event.is_set() is True
+        assert agent_b.cancel_event.is_set() is False
+        assert runtime.cancel_session("missing") is False
+
+        assert runtime.cancel_session(sid_b) is True
+        assert agent_b.cancel_event.is_set() is True
+    finally:
+        await runtime.aclose()

@@ -60,7 +60,7 @@ async def _run_scheduler(runtime: Runtime, bus: EventBus) -> None:
                     bus.publish(
                         {"type": "schedule_start", "id": schedule["id"], "name": schedule["name"]}
                     )
-                    await runtime.agent.run(schedule["task"])
+                    await runtime.start_run(schedule["task"])
                 finally:
                     runtime.scheduler.mark_ran(schedule["id"])
         except Exception:  # noqa: BLE001 - the loop must never die
@@ -172,7 +172,7 @@ def create_app(config: Config) -> FastAPI:
 
         async def _background() -> None:
             try:
-                await runtime.agent.run(info["task"], session_id, on_event=bus.publish)
+                await runtime.start_run(info["task"], session_id, on_event=bus.publish)
             except Exception as exc:  # noqa: BLE001 - keep the console alive
                 runtime.sessions.finish(session_id, f"{type(exc).__name__}: {exc}", "failed")
 
@@ -184,8 +184,8 @@ def create_app(config: Config) -> FastAPI:
         runtime = rt()
         if runtime.sessions.get(session_id) is None:
             raise HTTPException(status_code=404, detail="session not found")
-        runtime.agent.cancel()
-        return {"session_id": session_id, "status": "cancelling"}
+        cancelled = runtime.cancel_session(session_id)
+        return {"session_id": session_id, "status": "cancelling" if cancelled else "idle"}
 
     @app.post("/api/run")
     async def run(payload: dict[str, Any]) -> dict[str, Any]:
@@ -197,7 +197,7 @@ def create_app(config: Config) -> FastAPI:
 
         async def _background() -> None:
             try:
-                await runtime.agent.run(task, session_id, on_event=bus.publish)
+                await runtime.start_run(task, session_id, on_event=bus.publish)
             except Exception as exc:  # noqa: BLE001 - keep the console alive
                 runtime.sessions.finish(session_id, f"{type(exc).__name__}: {exc}", "failed")
 
@@ -279,7 +279,7 @@ def create_app(config: Config) -> FastAPI:
         if schedule is None:
             raise HTTPException(status_code=404, detail="schedule not found")
         bus.publish({"type": "schedule_start", "id": schedule_id, "name": schedule["name"]})
-        asyncio.create_task(runtime.agent.run(schedule["task"], on_event=bus.publish))
+        asyncio.create_task(runtime.start_run(schedule["task"], on_event=bus.publish))
         runtime.scheduler.mark_ran(schedule_id, now=time.time())
         return {"id": schedule_id, "status": "started"}
 

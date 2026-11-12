@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -52,6 +53,8 @@ class ToolCall:
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     call_id: str = ""
+    # 每次运行独立的取消信号；长耗时工具据此只终止自己这一次调用。
+    cancel_event: asyncio.Event | None = None
 
 
 @dataclass

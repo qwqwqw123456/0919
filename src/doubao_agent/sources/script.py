@@ -68,7 +68,7 @@ class ScriptSource:
         self.default_timeout = default_timeout
         self.max_cpu_seconds = max_cpu_seconds
         self.cancel_event = cancel_event
-        self._process: asyncio.subprocess.Process | None = None
+        self._processes: set[asyncio.subprocess.Process] = set()
         self._specs = [
             ToolSpec(
                 name="run_python",
@@ -123,6 +123,16 @@ class ScriptSource:
         else:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown script tool: {call.name}")
 
+        # 优先使用本次调用携带的取消信号，实现会话级取消互不干扰。
+        cancel_event = call.cancel_event or self.cancel_event
+        if cancel_event is not None and cancel_event.is_set():
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                error="cancelled",
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+            )
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -131,7 +141,7 @@ class ScriptSource:
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=_set_cpu_limit(self.max_cpu_seconds),
             )
-            self._process = process
+            self._processes.add(process)
         except Exception as exc:  # noqa: BLE001
             return ToolResult(
                 call_id=call.call_id,
@@ -140,11 +150,33 @@ class ScriptSource:
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
             )
 
+        communicate = asyncio.ensure_future(process.communicate())
+        cancel_wait: asyncio.Future | None = None
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            if cancel_event is None:
+                stdout, stderr = await asyncio.wait_for(communicate, timeout=timeout)
+            else:
+                cancel_wait = asyncio.ensure_future(cancel_event.wait())
+                done, _ = await asyncio.wait(
+                    {communicate, cancel_wait}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not done:
+                    raise asyncio.TimeoutError
+                if cancel_wait in done and not communicate.done():
+                    process.kill()
+                    await process.wait()
+                    communicate.cancel()
+                    return ToolResult(
+                        call_id=call.call_id,
+                        ok=False,
+                        error="cancelled",
+                        elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                stdout, stderr = communicate.result()
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
+            communicate.cancel()
             return ToolResult(
                 call_id=call.call_id,
                 ok=False,
@@ -152,15 +184,9 @@ class ScriptSource:
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
             )
         finally:
-            self._process = None
-
-        if self.cancel_event is not None and self.cancel_event.is_set():
-            return ToolResult(
-                call_id=call.call_id,
-                ok=False,
-                error="cancelled",
-                elapsed_ms=int((time.perf_counter() - started) * 1000),
-            )
+            if cancel_wait is not None:
+                cancel_wait.cancel()
+            self._processes.discard(process)
 
         out = stdout.decode("utf-8", errors="replace")
         err = stderr.decode("utf-8", errors="replace")
@@ -181,11 +207,16 @@ class ScriptSource:
         )
 
     async def cancel(self) -> None:
-        """Kill the currently running subprocess, if any."""
-        process = self._process
-        if process is not None and process.returncode is None:
-            process.kill()
-            await process.wait()
+        """Kill every subprocess this channel is currently running."""
+        processes = list(self._processes)
+        for process in processes:
+            if process.returncode is None:
+                process.kill()
+        for process in processes:
+            try:
+                await process.wait()
+            except ProcessLookupError:
+                pass
 
     async def health(self) -> tuple[bool, str]:
         return True, f"python {sys.version.split()[0]} · cwd {self.workspace}"

@@ -84,11 +84,8 @@ class Agent:
         self.cancel_event = cancel_event or asyncio.Event()
 
     def cancel(self) -> None:
-        """Request cancellation: signals the loop and kills any running subprocess."""
+        """Request cancellation: signals this run only and its running subprocess."""
         self.cancel_event.set()
-
-    async def _cancel_cleanup(self) -> None:
-        await self.registry.cancel()
 
     async def _complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
@@ -191,7 +188,6 @@ class Agent:
 
         while step < self.max_steps:
             if self.cancel_event.is_set():
-                await self._cancel_cleanup()
                 answer = "任务已被取消"
                 self.sessions.finish(session_id, answer, "cancelled")
                 self.audit.append(
@@ -400,7 +396,9 @@ class Agent:
             self.audit.append(session_id, "tool_call", tool=tool_name, ok=False, error="unknown tool")
             return ToolResult(call_id=call_id, ok=False, error=f"unknown tool: {tool_name}")
 
-        call = ToolCall(name=tool_name, arguments=arguments, call_id=call_id)
+        call = ToolCall(
+            name=tool_name, arguments=arguments, call_id=call_id, cancel_event=self.cancel_event
+        )
         decision = await self.policy.authorize(spec, call)
         self.audit.append(
             session_id,

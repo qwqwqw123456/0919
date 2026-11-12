@@ -209,7 +209,7 @@ async def _schedule_command(runtime: Runtime, args: argparse.Namespace) -> int:
         if schedule is None:
             print("未找到该任务", file=sys.stderr)
             return 1
-        result = await runtime.agent.run(schedule["task"], on_event=_print_event)
+        result = await runtime.start_run(schedule["task"], on_event=_print_event)
         scheduler.mark_ran(schedule_id)
         print(
             f"\n[schedule #{schedule_id}] status={result['status']} steps={result['steps']} "
@@ -335,7 +335,7 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
             if info is None:
                 print(f"会话不存在：{args.session_id}", file=sys.stderr)
                 return 2
-            result = await runtime.agent.run(
+            result = await runtime.start_run(
                 info["task"], session_id=args.session_id, on_event=_print_event
             )
             print(
@@ -379,8 +379,8 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
 
         if args.cmd == "run":
             if getattr(args, "no_record", False):
-                runtime.agent.record_recipes = False
-            result = await runtime.agent.run(args.task, args.session, on_event=_print_event)
+                runtime.config.record_recipes = False
+            result = await runtime.start_run(args.task, args.session, on_event=_print_event)
             recipe = f" recipe=#{result['recipe_id']}" if result.get("recipe_id") else ""
             print(
                 f"\n[session {result['session_id']}] status={result['status']} "
