@@ -20,6 +20,20 @@ cp agent.example.yaml agent.yaml   # 按需修改 model 段
 .venv/bin/doubao-agent run "往知识库写一条：项目已启动，然后检索‘项目’"
 ```
 
+## 换机 / 整机重建恢复
+
+云电脑沙箱重建后本地状态会清空，源码与配置模板在 git 仓库，按下面恢复：
+
+```bash
+git clone <仓库地址> && cd doubao-agent
+./scripts/bootstrap.sh          # 建 .venv、装依赖、备配置、自检（幂等，不含密钥）
+# 脚本检测到缺 .env.local 时会提示；手动写入密钥后即可运行
+```
+
+- **随仓库恢复**：源码、Python 依赖（`pyproject.toml`）、配置模板（`agent.example.yaml`）、示例技能。
+- **不随包迁移**：`.env.local`（密钥，已 gitignore，换机后手动填，不入库不外发）；`.agent/`（会话 / 记忆 / 知识库 / 调度登记）、`runs/`（审计产物）、`/workspace/skills` 软链均为本机易失状态，新环境从空态起步，需要时另行导出恢复。
+- 浏览器 / 电脑操作驱动属于平台层可选包，不在本仓库依赖内；需要真实 GUI 操作时按平台说明补装。
+
 ## 配置要点（`agent.yaml`）
 
 | 段 | 说明 |
