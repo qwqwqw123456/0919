@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 from conftest import _registry
@@ -124,6 +125,32 @@ def test_managed_mcp_merges_from_local_file(tmp_path, monkeypatch) -> None:
     cfg = load_config(tmp_path / "agent.yaml")
     names = {server.name for server in cfg.mcp_servers}
     assert "host" in names
+
+
+def test_env_local_injects_missing_vars(tmp_path, monkeypatch) -> None:
+    from doubao_agent.config import load_config
+
+    monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
+    monkeypatch.delenv("AGENT_TEST_ENV_LOCAL", raising=False)
+    (tmp_path / ".env.local").write_text(
+        "AGENT_TEST_ENV_LOCAL=from_env_local\n# 注释行\n\n", encoding="utf-8"
+    )
+
+    load_config(tmp_path / "agent.yaml")
+    assert os.environ["AGENT_TEST_ENV_LOCAL"] == "from_env_local"
+
+
+def test_env_local_does_not_override_existing(tmp_path, monkeypatch) -> None:
+    from doubao_agent.config import load_config
+
+    monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("AGENT_TEST_ENV_LOCAL", "already_set")
+    (tmp_path / ".env.local").write_text(
+        'AGENT_TEST_ENV_LOCAL="from_env_local"\n', encoding="utf-8"
+    )
+
+    load_config(tmp_path / "agent.yaml")
+    assert os.environ["AGENT_TEST_ENV_LOCAL"] == "already_set"
 
 
 async def test_scheduler_dispatches_concurrently() -> None:

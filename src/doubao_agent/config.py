@@ -15,6 +15,35 @@ def _default_workspace() -> Path:
     return Path(os.environ.get("AGENT_WORKSPACE") or Path.cwd()).resolve()
 
 
+def _load_env_file(path: Path) -> None:
+    """从 .env.local 注入环境变量；已存在的环境变量优先，不覆盖。
+
+    仅解析 KEY=VALUE 行，跳过注释与空行；文件缺失或损坏时静默跳过，不拖垮启动。
+    """
+    if not path.is_file():
+        return
+    try:
+        lines = path.read_text("utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not key or not key.replace("_", "").isalnum() or key[0].isdigit():
+            continue
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+def _load_local_env() -> None:
+    """加载当前目录与工作区下的 .env.local（不引入 python-dotenv 依赖）。"""
+    _load_env_file(Path.cwd() / ".env.local")
+    _load_env_file(_default_workspace() / ".env.local")
+
+
 @dataclass
 class MCPServerConfig:
     name: str
@@ -108,6 +137,7 @@ def _parse_mcp(items: list[dict[str, Any]]) -> list[MCPServerConfig]:
 
 
 def load_config(path: str | Path | None = None) -> Config:
+    _load_local_env()
     cfg = Config()
     cfg_path = Path(
         path or os.environ.get("DOUBAO_AGENT_CONFIG") or (cfg.workspace / "agent.yaml")
