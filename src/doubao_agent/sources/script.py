@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -104,10 +106,45 @@ class ScriptSource:
             return text
         return text[:_MAX_OUTPUT] + f"\n...[truncated {len(text) - _MAX_OUTPUT} chars]"
 
+    def _resolve_cwd(self, raw: Any) -> Path:
+        """把 cwd 固定在工作区内，阻断参数越界到工作区之外。"""
+        root = self.workspace.resolve()
+        target = Path(str(raw or root)).expanduser()
+        if not target.is_absolute():
+            target = root / target
+        target = target.resolve()
+        if not target.is_relative_to(root):
+            raise ValueError(f"cwd outside workspace: {target}")
+        return target
+
+    @staticmethod
+    async def _kill_tree(process: asyncio.subprocess.Process) -> None:
+        """回收整个进程组，避免 bash 拉起的子进程变成孤儿。"""
+        if process.returncode is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+        try:
+            await process.wait()
+        except ProcessLookupError:
+            pass
+
     async def call_tool(self, call: ToolCall) -> ToolResult:
         started = time.perf_counter()
         args = call.arguments or {}
-        cwd = str(args.get("cwd") or self.workspace)
+        try:
+            cwd = str(self._resolve_cwd(args.get("cwd")))
+        except ValueError as exc:
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                error=str(exc),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+            )
         timeout = float(args.get("timeout") or self.default_timeout)
 
         if call.name == "run_python":
@@ -119,7 +156,8 @@ class ScriptSource:
             command = str(args.get("command", ""))
             if not command.strip():
                 return ToolResult(call_id=call.call_id, ok=False, error="command is required")
-            argv = ["/bin/bash", "-lc", command]
+            # 非登录 shell：不加载 profile，避免别名 / PATH 被环境注入。
+            argv = ["/bin/bash", "-c", command]
         else:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown script tool: {call.name}")
 
@@ -140,6 +178,7 @@ class ScriptSource:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=_set_cpu_limit(self.max_cpu_seconds),
+                start_new_session=True,
             )
             self._processes.add(process)
         except Exception as exc:  # noqa: BLE001
@@ -163,8 +202,7 @@ class ScriptSource:
                 if not done:
                     raise asyncio.TimeoutError
                 if cancel_wait in done and not communicate.done():
-                    process.kill()
-                    await process.wait()
+                    await self._kill_tree(process)
                     communicate.cancel()
                     return ToolResult(
                         call_id=call.call_id,
@@ -174,8 +212,7 @@ class ScriptSource:
                     )
                 stdout, stderr = communicate.result()
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            await self._kill_tree(process)
             communicate.cancel()
             return ToolResult(
                 call_id=call.call_id,
@@ -196,7 +233,16 @@ class ScriptSource:
         if err:
             parts.append(f"[stderr]\n{err.rstrip()}")
         content = self._truncate("\n".join(parts) or "(no output)")
-        code = process.returncode or 0
+        code = process.returncode
+        if code is None:
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                content=content,
+                error="process exited without an exit code",
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                meta={"exit_code": None},
+            )
         return ToolResult(
             call_id=call.call_id,
             ok=code == 0,
@@ -208,15 +254,8 @@ class ScriptSource:
 
     async def cancel(self) -> None:
         """Kill every subprocess this channel is currently running."""
-        processes = list(self._processes)
-        for process in processes:
-            if process.returncode is None:
-                process.kill()
-        for process in processes:
-            try:
-                await process.wait()
-            except ProcessLookupError:
-                pass
+        for process in list(self._processes):
+            await self._kill_tree(process)
 
     async def health(self) -> tuple[bool, str]:
         return True, f"python {sys.version.split()[0]} · cwd {self.workspace}"
