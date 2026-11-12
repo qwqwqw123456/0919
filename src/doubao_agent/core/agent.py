@@ -687,7 +687,8 @@ class Agent:
         return None
 
     async def _execute(
-        self, tool_name: str, arguments: dict[str, Any], call_id: str, session_id: str
+        self, tool_name: str, arguments: dict[str, Any], call_id: str, session_id: str,
+        use_cache: bool = True,
     ) -> ToolResult:
         spec = self.registry.get(tool_name)
         if spec is None:
@@ -709,7 +710,7 @@ class Agent:
         if not decision.allowed:
             return ToolResult(call_id=call_id, ok=False, error=f"permission denied: {decision.reason}")
 
-        result = await self.registry.call(call)
+        result = await self.registry.call(call, use_cache=use_cache)
         self.audit.append(
             session_id,
             "tool_call",
@@ -791,7 +792,8 @@ class Agent:
         for index, step in enumerate(steps, 1):
             await self._emit(on_event, {"type": "tool_start", "tool": step["tool"]})
             result = await self._execute(
-                step["tool"], step.get("arguments") or {}, f"replay_{index}", session_id
+                step["tool"], step.get("arguments") or {}, f"replay_{index}", session_id,
+                use_cache=False,
             )
             if not result.ok:
                 failures += 1

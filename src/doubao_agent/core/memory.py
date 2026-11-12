@@ -10,6 +10,24 @@ from typing import Any
 
 KINDS = ("preference", "fact", "experience", "procedure")
 
+# 长期记忆出口凭据模式：回显的 token / 密钥不沉淀进记忆库。只打码明显模式，不误伤普通文本。
+_SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", re.I), "Bearer ***"),
+    (
+        re.compile(r"\b(api[_-]?key|secret|token|password|private_key)\s*[=:]\s*[^\s,;，；]+", re.I),
+        r"\1=***",
+    ),
+    (re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "<jwt>***"),
+    (re.compile(r"\b(?:AKLT|ak|sk|sk_live|pk_live)[A-Za-z0-9]{6,}\b"), "***"),
+]
+
+
+def _scrub_secrets(text: str) -> str:
+    for pattern, repl in _SECRET_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
+
+
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS facts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +129,7 @@ class MemoryStore:
         source: str = "",
         weight: float = 1.0,
     ) -> int:
-        clean = text.strip()
+        clean = _scrub_secrets(text.strip())
         if not clean:
             raise ValueError("memory text is empty")
         if kind not in KINDS:

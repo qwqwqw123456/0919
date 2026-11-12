@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import Any
 
 from .sources.base import CapabilitySource
-from .types import ToolCall, ToolResult, ToolSpec
+from .types import Risk, ToolCall, ToolResult, ToolSpec
 from .utils import dumps
 
 
 class CapabilityRegistry:
     """Single entry point for every capability, regardless of its channel."""
 
-    def __init__(self) -> None:
+    def __init__(self, cache_ttl: float = 60.0, cache_max: int = 128) -> None:
         self._sources: dict[str, CapabilitySource] = {}
         self._specs: dict[str, ToolSpec] = {}
         self._dispatch: dict[str, tuple[CapabilitySource, str]] = {}
         self._errors: dict[str, str] = {}
+        # 幂等只读工具的结果缓存：写工具与非幂等工具不缓存。
+        self._cache: dict[str, tuple[float, ToolResult]] = {}
+        self._cache_ttl = max(0.0, cache_ttl)
+        self._cache_max = max(0, cache_max)
 
     def add_source(self, source: CapabilitySource) -> None:
         self._sources[source.name] = source
@@ -63,12 +68,18 @@ class CapabilityRegistry:
         matches = [k for k in self._specs if k.endswith(suffix)]
         return matches[0] if len(matches) == 1 else None
 
-    async def call(self, call: ToolCall) -> ToolResult:
+    async def call(self, call: ToolCall, use_cache: bool = True) -> ToolResult:
         key = self.resolve(call.name)
         if key is None:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown tool: {call.name}")
         source, original = self._dispatch[key]
-        return await source.call_tool(
+        spec = self._specs[key]
+        cache_key = self._cache_key(key, call.arguments) if self._cacheable(spec) else None
+        if cache_key is not None and use_cache:
+            hit = self._cache_get(cache_key)
+            if hit is not None:
+                return replace(hit, call_id=call.call_id, meta={**hit.meta, "cached": True})
+        result = await source.call_tool(
             ToolCall(
                 name=original,
                 arguments=call.arguments,
@@ -76,6 +87,32 @@ class CapabilityRegistry:
                 cancel_event=call.cancel_event,
             )
         )
+        if cache_key is not None and result.ok:
+            self._cache_put(cache_key, result)
+        return result
+
+    def _cacheable(self, spec: ToolSpec) -> bool:
+        return self._cache_ttl > 0 and spec.idempotent and spec.risk == Risk.READ
+
+    @staticmethod
+    def _cache_key(name: str, arguments: dict[str, Any]) -> str:
+        return dumps({"n": name, "a": arguments}, sort_keys=True)
+
+    def _cache_get(self, key: str) -> ToolResult | None:
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        expires, result = entry
+        if time.time() >= expires:
+            self._cache.pop(key, None)
+            return None
+        return result
+
+    def _cache_put(self, key: str, result: ToolResult) -> None:
+        if len(self._cache) >= self._cache_max:
+            oldest = next(iter(self._cache))
+            self._cache.pop(oldest, None)
+        self._cache[key] = (time.time() + self._cache_ttl, result)
 
     async def cancel(self) -> None:
         """Best-effort cancellation across all sources (e.g. kill running scripts)."""

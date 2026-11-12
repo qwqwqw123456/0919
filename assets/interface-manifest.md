@@ -191,7 +191,7 @@
 | `schedules` | `core/scheduler.py` | cron 定时任务：表达式、任务、启用态、上次/下次运行 |
 | `skill_usage` | `core/evolution.py` | 技能用量台账：`use`/`view`/`patch` 计数、最后使用时间、生命周期状态（`active`/`idle`/`archived`）、`pinned` 保护位；14 天闲置、30 天归档，复用已归档技能自动复活 |
 
-审计为追加式哈希链 JSONL：`<runs_dir>/<session_id>/audit.jsonl`；写入前对 `token` / `password` / `secret` / `cookie` / `api_key` / `private_key` 及 `*_token`、`*_secret` 等字段递归脱敏为 `***`（`max_tokens` 等非凭据字段不误伤）。`audit verify` 重算整链，被篡改返回退出码 1。
+审计为追加式哈希链 JSONL：`<runs_dir>/<session_id>/audit.jsonl`；写入前对 `token` / `password` / `secret` / `cookie` / `api_key` / `private_key` 及 `*_token`、`*_secret` 等字段递归脱敏为 `***`（`max_tokens` 等非凭据字段不误伤）。长期记忆落库前另对 Bearer 令牌、`api_key=/secret=/token=` 赋值、JWT、`ak/sk/AKLT` 前缀等明显凭据模式打码；凭据本身只从环境变量/`.env.local` 注入，运行时不做加密 vault（归平台密钥保管）。`audit verify` 重算整链，被篡改返回退出码 1。
 
 ### 9.1 三层记忆体系
 
@@ -231,17 +231,18 @@
 
 配置文件（`agent.yaml`，模板 `agent.example.yaml`）字段：
 
-`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`provider_retries`、`provider_fallback`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
+`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`provider_retries`、`provider_fallback`、`tool_cache_enabled`、`tool_cache_ttl`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
 - `max_calls` / `max_tokens`：单次运行的模型调用数与 token 预算，`0` 表示不限；超限时任务以 `incomplete` 收尾并直接说明预算耗尽。
 - `repair_rounds`：工具失败后允许模型修正参数重试的轮数，`0` 表示不修正。
 - `provider_retries`：模型端点异常重试次数；401/403/404 不重试，直接进降级判断；`provider_fallback` 为 `"mock"` 时主端点失败切内置 mock 兜底并在结果标注 `degraded`，留空则不降级、异常上抛。
+- `tool_cache_enabled` / `tool_cache_ttl`：幂等且只读（L0）工具的结果进程内缓存开关与存活秒数；写工具、非幂等工具不缓存；配方 replay 强制绕过缓存真实重放。
 - `evolution`：技能用量遥测与生命周期审计；`stale_days`（默认 14）未用算闲置，`archive_days`（默认 30）进归档，只改状态位不删文件；`pinned` 技能不参与自动流转。
 - `mcp_servers` 会与 `<db_path 所在目录>/mcp.local.yaml`（`mcp add/remove` 写入）合并，同名以 `agent.yaml` 为准。
 
 环境变量覆盖（前缀 `AGENT_*`）：
 
-`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_PROVIDER_RETRIES`、`AGENT_PROVIDER_FALLBACK`、`AGENT_EVOLUTION`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
+`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_PROVIDER_RETRIES`、`AGENT_PROVIDER_FALLBACK`、`AGENT_TOOL_CACHE`、`AGENT_TOOL_CACHE_TTL`、`AGENT_EVOLUTION`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
 
 - `.env.local` 自动加载：`load_config()` 启动时读取当前目录与工作区的 `.env.local`，解析 `KEY=VALUE` 行（兼容剥离 `export ` 前缀，注释/空行跳过）；只补缺省变量，已存在的环境变量优先不覆盖；文件缺失或读取失败静默跳过，不引入 `python-dotenv` 依赖。
 

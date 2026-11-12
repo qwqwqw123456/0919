@@ -4,6 +4,7 @@ import pytest
 
 from doubao_agent.core.knowledge import KnowledgeStore
 from doubao_agent.core.longterm import LongTermMemory
+from doubao_agent.core.memory import MemoryStore
 from doubao_agent.core.working import WorkingMemory
 
 
@@ -67,6 +68,19 @@ def test_longterm_three_tables(tmp_path) -> None:
     deviation = store.deviations()[0]
     assert deviation["gap"] == "+60"
     assert store.stats() == {"lessons": 1, "observations": 1, "deviations": 1}
+
+
+def test_memory_scrubs_secrets_before_persist(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "agent.db")
+    store.remember(
+        "调用回显 Authorization: Bearer abcDEF123456xyz，akLTabcdefgh123456 已失效",
+        kind="experience",
+    )
+    rows = store.recall("Bearer 回显", limit=5)
+    persisted = " ".join(row["text"] for row in rows)
+    assert "abcDEF123456xyz" not in persisted
+    assert "akLTabcdefgh123456" not in persisted
+    assert "***" in persisted
 
 
 def test_knowledge_domains_index_and_filter(tmp_path) -> None:

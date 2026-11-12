@@ -30,6 +30,8 @@ max_tokens: 0       # 单次运行 token 预算，0=不限
 repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数（0=不重试）
 provider_retries: 1     # 端点异常重试次数；401/403 不重试，直接进降级判断
 provider_fallback: ""   # 备用 provider："" 不降级（默认，避免静默换模型骗人）；"mock" 用内置 mock
+tool_cache_enabled: true   # 幂等只读工具结果缓存开关；写工具/非幂等工具不缓存
+tool_cache_ttl: 60         # 结果缓存存活秒数；0 或开关关闭即不缓存
 port: 8765
 auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
                                  # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可

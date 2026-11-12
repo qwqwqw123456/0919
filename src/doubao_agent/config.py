@@ -82,6 +82,8 @@ class Config:
     evolution_archive_days: int = 30   # 多久没用进归档状态（只改状态位，不删文件）
     provider_retries: int = 1          # 端点异常重试次数；401/403 不重试，直接进降级判断
     provider_fallback: str = ""        # 备用 provider："" 不降级（默认）；"mock" 用内置 mock
+    tool_cache_enabled: bool = True    # 幂等只读工具结果缓存开关
+    tool_cache_ttl: float = 60.0       # 结果缓存存活秒数；0 或开关关闭即不缓存
     planning_enabled: bool = False     # 入口单次规划：每任务 1 次模型调用，执行阶段零推理
     skills_dir: Path = field(
         default_factory=lambda: Path(
@@ -181,6 +183,8 @@ def load_config(path: str | Path | None = None) -> Config:
             )
         cfg.provider_retries = max(0, int(data.get("provider_retries", cfg.provider_retries)))
         cfg.provider_fallback = str(data.get("provider_fallback", cfg.provider_fallback) or "")
+        cfg.tool_cache_enabled = bool(data.get("tool_cache_enabled", cfg.tool_cache_enabled))
+        cfg.tool_cache_ttl = max(0.0, float(data.get("tool_cache_ttl", cfg.tool_cache_ttl)))
         cfg.skills_dir = Path(data.get("skills_dir", cfg.workspace / "skills"))
         cfg.context_limit = max(4, int(data.get("context_limit", cfg.context_limit)))
         cfg.scheduler_enabled = bool(data.get("scheduler_enabled", cfg.scheduler_enabled))
@@ -229,6 +233,10 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.provider_retries = max(0, int(os.environ["AGENT_PROVIDER_RETRIES"]))
     if os.environ.get("AGENT_PROVIDER_FALLBACK") is not None:
         cfg.provider_fallback = os.environ["AGENT_PROVIDER_FALLBACK"].strip().lower()
+    if os.environ.get("AGENT_TOOL_CACHE") is not None:
+        cfg.tool_cache_enabled = os.environ["AGENT_TOOL_CACHE"].lower() in ("1", "true", "yes", "on")
+    if os.environ.get("AGENT_TOOL_CACHE_TTL"):
+        cfg.tool_cache_ttl = max(0.0, float(os.environ["AGENT_TOOL_CACHE_TTL"]))
     cfg.skills_dir = Path(os.environ.get("AGENT_SKILLS_DIR", cfg.skills_dir))
     if os.environ.get("AGENT_CONTEXT_LIMIT"):
         cfg.context_limit = max(4, int(os.environ["AGENT_CONTEXT_LIMIT"]))

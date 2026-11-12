@@ -58,7 +58,8 @@ class Runtime:
 
     @classmethod
     async def build(cls, config: Config, approver: Approver | None = None) -> "Runtime":
-        registry = CapabilityRegistry()
+        cache_ttl = config.tool_cache_ttl if config.tool_cache_enabled else 0.0
+        registry = CapabilityRegistry(cache_ttl=cache_ttl)
 
         mcp_servers = list(config.mcp_servers)
         if config.mcp_auto_discover and not mcp_servers:
