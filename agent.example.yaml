@@ -38,9 +38,10 @@ model:
   # temperature: 0.2
 
 # 豆包宿主原生能力桥：自动发现全部原生能力（浏览器/桌面/通知/剪贴板/媒体/模型推理…）
+# 地址由宿主注入 AGENT_BRIDGE_URL；注意 18080 是云电脑的 HTTP 代理，不是桥。
 bridge:
-  enabled: false
-  url: http://127.0.0.1:18080/host
+  enabled: true
+  url: ""                            # 例：http://127.0.0.1:<port>/host
   token: ""
   capabilities_path: /capabilities   # 返回 {capabilities:[{name,description,input_schema,risk}]}
   fallback: true                     # 宿主无清单时，退回内置浏览器/桌面工具集

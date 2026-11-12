@@ -1,0 +1,36 @@
+workspace: /workspace
+runs_dir: /workspace/runs
+db_path: /workspace/.agent/agent.db
+permission_mode: guarded
+auto_approve:
+  - tool: send_message
+    arguments: {target_id: self}
+    risk: L2
+    reason: 仅允许发送给本人
+script_risk: L1
+script_max_cpu: 0
+record_recipes: true
+planning:
+  enabled: true
+skills_dir: /workspace/skills
+context_limit: 40
+scheduler_enabled: true
+scheduler_interval: 30
+max_steps: 12
+port: 8765
+
+model:
+  provider: host
+  capability: model.complete
+  temperature: 0.2
+
+bridge:
+  enabled: true
+  # 宿主桥地址由豆包云电脑注入 AGENT_BRIDGE_URL（18080 是本机 HTTP 代理，不是桥）。
+  url: ""
+  token: ""
+  capabilities_path: /capabilities
+  fallback: true
+
+mcp_servers: []
+api_sources: []
