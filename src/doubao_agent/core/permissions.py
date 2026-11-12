@@ -53,7 +53,9 @@ class PolicyRule:
         )
 
     def allows(self, spec: ToolSpec, call: ToolCall) -> bool:
-        if not fnmatchcase(spec.name, self.tool):
+        # 注册表会把工具名限定为 `<source>.<name>`，规则按裸名或全名都应能命中。
+        names = {spec.name, spec.name.rsplit(".", 1)[-1]}
+        if not any(fnmatchcase(name, self.tool) for name in names):
             return False
         try:
             ceiling = _RISK_RANK[Risk(self.risk)]

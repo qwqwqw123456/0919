@@ -1022,3 +1022,16 @@ async def test_runtime_reload_skills_picks_up_new_skill(tmp_path) -> None:
         assert runtime.registry.get("skill.read") is not None
     finally:
         await runtime.aclose()
+
+
+async def test_policy_rule_matches_source_prefixed_tool_name() -> None:
+    policy = PermissionPolicy(
+        "guarded",
+        rules=[{"tool": "send_message", "arguments": {"target_id": "self"}, "risk": "L2"}],
+    )
+    spec = ToolSpec(name="native.send_message", description="send", risk=Risk.IRREVERSIBLE)
+    decision = await policy.authorize(
+        spec, ToolCall(name="native.send_message", arguments={"target_id": "self"})
+    )
+    assert decision.allowed is True
+    assert decision.needs_approval is False
