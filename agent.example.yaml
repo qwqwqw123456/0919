@@ -39,6 +39,7 @@ model:
   # base_url: https://your-endpoint.example.com/v1
   # model: your-model-name
   # api_key_env: OPENAI_API_KEY  # 启动前 export，例如 export OPENAI_API_KEY=sk-xxx
+  # 已验证可用示例：base_url: https://api.longcat.chat/openai/v1，model: LongCat-2.5
   temperature: 0.2
 
 # 通用 REST 宿主桥（目标形态，非当前云电脑现状）：

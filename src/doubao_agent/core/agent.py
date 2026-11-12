@@ -86,11 +86,8 @@ class Agent:
         self.context_limit = context_limit
         self.working = working
         self.cancel_event = cancel_event or asyncio.Event()
-        # 会话级产物清单与目录扫描缓存：目录 mtime 未变时复用上次结果。
+        # 会话级产物清单：只扫本会话目录，按路径去重，不做 mtime 缓存（避免同一时间片内漏扫）。
         self._artifact_seen: dict[str, set[str]] = {}
-        self._artifact_dirs: dict[
-            str, dict[Path, tuple[float, tuple[Path, ...], tuple[Path, ...]]]
-        ] = {}
 
     def cancel(self) -> None:
         """Request cancellation: signals this run only and its running subprocess."""
@@ -465,48 +462,31 @@ class Agent:
         if seen is None:
             seen = {row["path"] for row in self.sessions.artifacts(session_id)}
             self._artifact_seen[session_id] = seen
-        cache = self._artifact_dirs.setdefault(session_id, {})
-        for path in self._scan_artifacts(root, cache):
+        for path in self._scan_artifacts(root):
             resolved = str(path)
             if resolved not in seen:
                 seen.add(resolved)
                 self.sessions.add_artifact(session_id, resolved)
 
     @staticmethod
-    def _scan_artifacts(
-        root: Path, cache: dict[Path, tuple[float, tuple[Path, ...], tuple[Path, ...]]]
-    ) -> list[Path]:
-        """按目录 mtime 增量扫描：未变化的目录只 stat，不重新枚举条目。"""
+    def _scan_artifacts(root: Path) -> list[Path]:
+        """遍历单个会话目录，返回交付文件（排除审计日志）。只扫本会话，不扫整个 runs/。"""
         files: list[Path] = []
         stack = [root]
         while stack:
             folder = stack.pop()
             try:
-                mtime = folder.stat().st_mtime
-            except OSError:
-                continue
-            hit = cache.get(folder)
-            if hit and hit[0] == mtime:
-                files.extend(hit[1])
-                stack.extend(hit[2])
-                continue
-            try:
                 entries = list(folder.iterdir())
             except OSError:
                 continue
-            found: list[Path] = []
-            subdirs: list[Path] = []
             for entry in entries:
                 try:
                     if entry.is_dir():
-                        subdirs.append(entry)
+                        stack.append(entry)
                     elif entry.is_file() and entry.name != "audit.jsonl":
-                        found.append(entry)
+                        files.append(entry)
                 except OSError:
                     continue
-            cache[folder] = (mtime, tuple(found), tuple(subdirs))
-            files.extend(found)
-            stack.extend(subdirs)
         return files
 
     def _record_recipe(

@@ -20,14 +20,13 @@ max_steps: 12
 port: 8765
 auth_token: ""
 
-# 真模型推理：云电脑为 CPU 环境，不自建模型，走外部 OpenAI 兼容接口。
-# 填好 base_url / model 后把 provider 改成 openai，并按 api_key_env 指定的变量名注入密钥
-# （建议在启动前 export，不要写进本文件——agent.yaml 是入库文件）。
+# 真模型推理：CPU 云电脑不自建模型，走 LongCat OpenAI 兼容接口。
+# 密钥不写本文件（入库），由 .env.local 的 OPENAI_API_KEY 注入。
 model:
-  provider: mock                 # 填好下面三项后改为 openai
-  # base_url: https://your-endpoint.example.com/v1
-  # model: your-model-name
-  # api_key_env: OPENAI_API_KEY
+  provider: openai
+  base_url: https://api.longcat.chat/openai/v1
+  model: LongCat-2.5
+  api_key_env: OPENAI_API_KEY
   temperature: 0.2
 
 bridge:

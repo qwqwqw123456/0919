@@ -72,10 +72,16 @@ class KnowledgeSource:
             return ToolResult(call_id=call.call_id, ok=True, content="\n\n".join(lines))
 
         if call.name == "add":
-            title = str(args.get("title", "")).strip()
-            text = str(args.get("text", "")).strip()
+            # 兼容模型常见的别名写法（content/body、name/heading），避免一次参数命名差异直接失败。
+            title = str(args.get("title") or args.get("name") or args.get("heading") or "").strip()
+            text = str(args.get("text") or args.get("content") or args.get("body") or "").strip()
             if not title or not text:
-                return ToolResult(call_id=call.call_id, ok=False, error="title and text are required")
+                got = ", ".join(args) or "无"
+                return ToolResult(
+                    call_id=call.call_id,
+                    ok=False,
+                    error=f"knowledge.add 需要 title 与 text（本次收到字段：{got}）",
+                )
             try:
                 doc_id = self.store.add_text(title, text, source=str(args.get("source", "")))
             except ValueError as exc:
