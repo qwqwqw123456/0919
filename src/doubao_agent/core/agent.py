@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
+import mimetypes
 from pathlib import Path
 from typing import Any, Callable
 
@@ -52,6 +54,25 @@ def _trim_messages(messages: list[dict[str, Any]], limit: int) -> list[dict[str,
             keep = keep[index:]
             break
     return [system, *keep]
+
+
+_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+
+
+def build_user_content(task: str, images: list[str] | None) -> Any:
+    """把图片编码为 OpenAI 多模态消息内容；无图片时仍返回纯文本。"""
+    if not images:
+        return task
+    parts: list[dict[str, Any]] = [{"type": "text", "text": task}]
+    for raw in images:
+        path = Path(raw)
+        data = path.read_bytes()
+        if len(data) > _IMAGE_MAX_BYTES:
+            raise ValueError(f"图片过大：{path.name} 超过 5MB")
+        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        encoded = base64.b64encode(data).decode("ascii")
+        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}})
+    return parts
 
 
 class Agent:
@@ -162,6 +183,7 @@ class Agent:
         task: str,
         session_id: str | None = None,
         on_event: Callable[[dict[str, Any]], Any] | None = None,
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
         """会话入口：先读工作记忆再开口，结束时回写状态。"""
         if self.working is not None:
@@ -169,7 +191,7 @@ class Agent:
         status = "failed"
         summary = ""
         try:
-            result = await self._run(task, session_id, on_event)
+            result = await self._run(task, session_id, on_event, images=images)
             status = str(result.get("status") or "completed")
             summary = str(result.get("answer") or "")
             return result
@@ -182,11 +204,13 @@ class Agent:
         task: str,
         session_id: str | None = None,
         on_event: Callable[[dict[str, Any]], Any] | None = None,
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
         existing = self.sessions.get(session_id) if session_id else None
         history = self.sessions.messages(session_id) if existing else []
         # 只有真正有进度的会话才算恢复；预创建的空会话仍然走入口规划。
-        if self.planner is not None and not history:
+        # 带图片时跳过入口规划：规划只看文本，图片要留给多模态主循环。
+        if self.planner is not None and not history and not images:
             plan = await self.planner.plan(
                 task, self.registry.list_tools(), self._memory_context_text(task)
             )
@@ -207,7 +231,7 @@ class Agent:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         messages.extend(history)
         if not history:
-            user_message = {"role": "user", "content": task}
+            user_message = {"role": "user", "content": build_user_content(task, images)}
             messages.append(user_message)
             self.sessions.append_message(session_id, 0, user_message)
 
@@ -381,6 +405,7 @@ class Agent:
             answer = result.content if result.ok else f"脚本执行失败：{result.error}"
         else:
             answers: list[str] = []
+            done: dict[str, bool] = {}
             for index, step in enumerate(plan.steps, 1):
                 if self.cancel_event.is_set():
                     ok = False
@@ -388,6 +413,17 @@ class Agent:
                     break
                 tool = step["tool"]
                 arguments = step.get("arguments") or {}
+                step_id = str(step.get("id") or tool)
+                missing = [
+                    dep for dep in (step.get("depends_on") or []) if not done.get(str(dep), False)
+                ]
+                if missing:
+                    ok = False
+                    done[step_id] = False
+                    answers.append(
+                        f"第 {index} 步 {tool} 跳过：上游 {', '.join(missing)} 未成功"
+                    )
+                    continue
                 self.sessions.append_message(
                     session_id,
                     0,
@@ -416,11 +452,14 @@ class Agent:
                     if repaired is not None and repaired.ok:
                         steps[-1]["ok"] = True
                         steps[-1]["repaired"] = True
+                        done[step_id] = True
                         answers.append(repaired.content)
                         continue
                     ok = False
+                    done[step_id] = False
                     answers.append(f"第 {index} 步 {tool} 失败：{result.error}")
-                    break
+                    continue
+                done[step_id] = True
                 answers.append(result.content)
             answer = "\n".join(answers) if answers else "计划执行完成"
 

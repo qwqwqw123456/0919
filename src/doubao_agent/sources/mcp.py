@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import socket
 import time
 from contextlib import AsyncExitStack
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -14,6 +17,14 @@ from .base import SourceError
 
 # 云电脑的能力入口是标准 MCP（平台侧 8091 端口），启动时可自动探测。
 DEFAULT_HOST_MCP_URL = "http://127.0.0.1:8091/mcp"
+
+
+def _tcp_reachable(host: str, port: int, timeout: float) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 async def probe_http_mcp(
@@ -59,11 +70,50 @@ class MCPSource:
         self.name = cfg.name
         self._stack: AsyncExitStack | None = None
         self._session: Any = None
+        self._failed: str | None = None
 
     async def _ensure(self) -> Any:
         if self._session is not None:
             return self._session
+        if self._failed is not None:
+            raise SourceError(self._failed)
 
+        await self._precheck()
+        try:
+            session = await self._connect()
+        except BaseException as exc:  # noqa: BLE001 - 含 anyio 取消域异常，一律判不可用
+            self._failed = f"MCP {self.name} 初始化失败：{type(exc).__name__}: {exc}"
+            await self._discard()
+            raise SourceError(self._failed) from exc
+        self._session = session
+        return session
+
+    async def _precheck(self) -> None:
+        """http/sse 先做一次 TCP 连通性探测，避免在端口未开放时触发客户端清理异常。"""
+        transport = self.cfg.transport.lower()
+        if transport not in ("http", "streamable_http", "streamable-http", "sse"):
+            return
+        if not self.cfg.url:
+            return
+        parsed = urlparse(self.cfg.url)
+        host, port = parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+        if not host:
+            return
+        reachable = await asyncio.to_thread(_tcp_reachable, host, port, 1.0)
+        if not reachable:
+            raise SourceError(f"MCP {self.name} 不可达：{host}:{port}")
+
+    async def _discard(self) -> None:
+        stack, self._stack = self._stack, None
+        self._session = None
+        if stack is None:
+            return
+        try:
+            await stack.aclose()
+        except BaseException:  # noqa: BLE001 - 清理阶段的取消域报错一律吞掉
+            pass
+
+    async def _connect(self) -> Any:
         try:
             from mcp import ClientSession
         except ImportError as exc:  # pragma: no cover - dependency guard
@@ -102,7 +152,6 @@ class MCPSource:
 
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
-        self._session = session
         return session
 
     async def list_tools(self) -> list[ToolSpec]:
@@ -160,7 +209,4 @@ class MCPSource:
             return False, f"{type(exc).__name__}: {exc}"
 
     async def aclose(self) -> None:
-        if self._stack is not None:
-            await self._stack.aclose()
-        self._stack = None
-        self._session = None
+        await self._discard()

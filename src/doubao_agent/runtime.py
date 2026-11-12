@@ -222,13 +222,14 @@ class Runtime:
         task: str,
         session_id: str | None = None,
         on_event: Callable[[dict[str, Any]], Any] | None = None,
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
         """每次运行使用独立 Agent，取消只影响该会话，不波及其他并发任务。"""
         session_id = session_id or self.sessions.create(task)
         agent = self.spawn_agent()
         self._runs[session_id] = agent
         try:
-            return await agent.run(task, session_id, on_event=on_event)
+            return await agent.run(task, session_id, on_event=on_event, images=images)
         finally:
             self._runs.pop(session_id, None)
 

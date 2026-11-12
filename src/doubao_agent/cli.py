@@ -10,6 +10,8 @@ import sys
 import time
 from typing import Any
 
+import yaml
+
 from .config import Config, load_config
 from .core.audit import AuditLog
 from .core.memory import KINDS as MEMORY_KINDS
@@ -271,6 +273,58 @@ def _state_command(runtime: Runtime, args: argparse.Namespace) -> int:
     return 0
 
 
+def _mcp_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    """登记 / 移除 MCP：写入 .agent/mcp.local.yaml，下次启动生效，不改 agent.yaml。"""
+    path = runtime.config.db_path.parent / "mcp.local.yaml"
+    entries: list[dict[str, Any]] = []
+    if path.is_file():
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+            entries = [e for e in loaded if isinstance(e, dict)]
+        except (yaml.YAMLError, OSError):
+            entries = []
+
+    if args.action == "list":
+        if not runtime.config.mcp_servers:
+            print("未配置任何 MCP（可用 mcp add 登记）")
+        for server in runtime.config.mcp_servers:
+            target = server.url or f"{server.command} {' '.join(server.args or [])}"
+            print(f"{server.transport}\t{server.name}\t{target}")
+        return 0
+
+    if not args.name:
+        print(f"用法: mcp {args.action} <名称> [--url 地址 | --command 命令 --args ...]", file=sys.stderr)
+        return 2
+
+    if args.action == "remove":
+        remaining = [e for e in entries if e.get("name") != args.name]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(remaining, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        if len(remaining) == len(entries):
+            print("未找到该 MCP（可能来自 agent.yaml，需手动删除）", file=sys.stderr)
+            return 1
+        print(f"已移除 {args.name}，下次启动生效")
+        return 0
+
+    if args.command:
+        entry: dict[str, Any] = {
+            "name": args.name,
+            "transport": "stdio",
+            "command": args.command,
+            "args": args.args or [],
+        }
+    elif args.url:
+        entry = {"name": args.name, "transport": args.transport or "http", "url": args.url}
+    else:
+        print("mcp add 需要 --url 或 --command", file=sys.stderr)
+        return 2
+    entries = [e for e in entries if e.get("name") != args.name] + [entry]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(entries, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    print(f"已登记 {args.name}（{entry['transport']}），下次启动生效")
+    return 0
+
+
 def _longterm_command(runtime: Runtime, args: argparse.Namespace) -> int:
     store = runtime.longterm
     if args.kind == "stats":
@@ -421,6 +475,21 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
                 count = await runtime.reload_skills()
                 print(f"已重载 {count} 个 Skill")
                 return 0
+            if args.action in ("install", "uninstall"):
+                if not args.target:
+                    print(f"用法: skills {args.action} <目录或名称>", file=sys.stderr)
+                    return 2
+                try:
+                    if args.action == "install":
+                        skill = runtime.skills.install(args.target)
+                        print(f"已安装 {skill.name} v{skill.version} → {skill.directory}")
+                    else:
+                        removed = runtime.skills.uninstall(args.target)
+                        print("已卸载" if removed else "未找到该技能")
+                except (ValueError, OSError) as exc:
+                    print(f"失败：{exc}", file=sys.stderr)
+                    return 1
+                return 0
             skills = runtime.skills.list()
             if not skills:
                 print(f"技能目录为空：{runtime.skills.root}")
@@ -495,10 +564,15 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "parallel":
             return await _parallel_command(runtime, args)
 
+        if args.cmd == "mcp":
+            return _mcp_command(runtime, args)
+
         if args.cmd == "run":
             if getattr(args, "no_record", False):
                 runtime.config.record_recipes = False
-            result = await runtime.start_run(args.task, args.session, on_event=_print_event)
+            result = await runtime.start_run(
+                args.task, args.session, on_event=_print_event, images=args.image
+            )
             recipe = f" recipe=#{result['recipe_id']}" if result.get("recipe_id") else ""
             print(
                 f"\n[session {result['session_id']}] status={result['status']} "
@@ -520,8 +594,20 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sources", help="检查各接入通道健康状态")
     skills_parser = sub.add_parser("skills", help="列出 Skill 或热重载技能目录")
     skills_parser.add_argument(
-        "action", nargs="?", choices=["list", "reload"], default="list", help="list | reload"
+        "action",
+        nargs="?",
+        choices=["list", "reload", "install", "uninstall"],
+        default="list",
+        help="list | reload | install <目录> | uninstall <名称>",
     )
+    skills_parser.add_argument("target", nargs="?", default=None, help="安装目录或技能名称")
+    mcp_parser = sub.add_parser("mcp", help="运行时登记 MCP（写入 .agent/mcp.local.yaml）")
+    mcp_parser.add_argument("action", choices=["list", "add", "remove"], help="list | add | remove")
+    mcp_parser.add_argument("name", nargs="?", default=None, help="MCP 名称")
+    mcp_parser.add_argument("--url", default=None, help="http / sse 地址")
+    mcp_parser.add_argument("--transport", default=None, help="http | sse，默认 http")
+    mcp_parser.add_argument("--command", default=None, help="stdio 启动命令")
+    mcp_parser.add_argument("--args", nargs="*", default=None, help="stdio 命令参数")
     sub.add_parser("sessions", help="列出最近的会话")
 
     resume_parser = sub.add_parser("resume", help="从检查点恢复会话")
@@ -531,6 +617,9 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("task", help="任务描述")
     run_parser.add_argument("--session", default=None, help="恢复已有会话")
     run_parser.add_argument("--no-record", action="store_true", help="不把本次执行录制为配方")
+    run_parser.add_argument(
+        "--image", action="append", default=None, help="附带图片（可重复），需模型支持视觉"
+    )
 
     sub.add_parser("recipes", help="列出已录制的配方")
     replay_parser = sub.add_parser("replay", help="按配方零模型重放")

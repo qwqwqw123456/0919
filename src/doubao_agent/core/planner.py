@@ -25,6 +25,7 @@ PLANNER_PROMPT = """你是任务规划器。你只做一次规划，不执行，
 2. 最多 8 步；参数不确定就不要编造，改用 answer 说明缺什么。
 3. 脚本必须非交互，关键结果用 print 输出。
 4. 工具名必须来自下面的清单，不得臆造。
+5. 步骤有先后依赖时可加 "id" 与 "depends_on":["上游id"]；无依赖不要加，执行时会自动顺序跑。
 
 可用工具：
 {catalog}"""
@@ -82,7 +83,13 @@ def parse_plan(text: str) -> Plan | None:
             arguments = item.get("arguments") or {}
             if not isinstance(arguments, dict):
                 return None
-            steps.append({"tool": tool.strip(), "arguments": arguments})
+            step: dict[str, Any] = {"tool": tool.strip(), "arguments": arguments}
+            depends = item.get("depends_on")
+            if isinstance(depends, list) and depends:
+                step["depends_on"] = [str(d) for d in depends]
+            if item.get("id"):
+                step["id"] = str(item["id"])
+            steps.append(step)
         return Plan(mode="tools", steps=steps)
 
     return None

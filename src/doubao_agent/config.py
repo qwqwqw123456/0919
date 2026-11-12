@@ -204,5 +204,15 @@ def load_config(path: str | Path | None = None) -> Config:
     if os.environ.get("AGENT_EMBEDDING_CAPABILITY"):
         cfg.embedding["capability"] = os.environ["AGENT_EMBEDDING_CAPABILITY"]
 
+    # 运行时登记的 MCP（doubao-agent mcp add/remove 写入），不污染带注释的 agent.yaml。
+    managed = cfg.db_path.parent / "mcp.local.yaml"
+    if managed.is_file():
+        try:
+            extra = yaml.safe_load(managed.read_text(encoding="utf-8")) or []
+        except (yaml.YAMLError, OSError):
+            extra = []
+        known = {server.name for server in cfg.mcp_servers}
+        cfg.mcp_servers.extend(s for s in _parse_mcp(extra) if s.name not in known)
+
     cfg.ensure_dirs()
     return cfg

@@ -52,21 +52,43 @@ class EventBus:
 
 
 async def _run_scheduler(runtime: Runtime, bus: EventBus) -> None:
-    """Poll due cron schedules and dispatch them through the agent."""
+    """Poll due cron schedules and dispatch them concurrently (bounded, non-blocking)."""
+
     interval = runtime.config.scheduler_interval
-    while True:
-        try:
-            for schedule in runtime.scheduler.due():
-                try:
-                    bus.publish(
-                        {"type": "schedule_start", "id": schedule["id"], "name": schedule["name"]}
-                    )
-                    await runtime.start_run(schedule["task"])
-                finally:
-                    runtime.scheduler.mark_ran(schedule["id"])
-        except Exception:  # noqa: BLE001 - the loop must never die
-            pass
-        await asyncio.sleep(interval)
+    semaphore = asyncio.Semaphore(3)
+    inflight: set[str] = set()
+    tasks: set[asyncio.Task[Any]] = set()
+
+    async def dispatch(schedule: dict[str, Any]) -> None:
+        schedule_id = schedule["id"]
+        async with semaphore:
+            try:
+                bus.publish(
+                    {"type": "schedule_start", "id": schedule_id, "name": schedule["name"]}
+                )
+                await runtime.start_run(schedule["task"])
+            except Exception:  # noqa: BLE001 - one schedule must not kill the loop
+                pass
+            finally:
+                runtime.scheduler.mark_ran(schedule_id)
+                inflight.discard(schedule_id)
+
+    try:
+        while True:
+            try:
+                for schedule in runtime.scheduler.due():
+                    if schedule["id"] in inflight:
+                        continue
+                    inflight.add(schedule["id"])
+                    task = asyncio.create_task(dispatch(schedule))
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
+            except Exception:  # noqa: BLE001 - the loop must never die
+                pass
+            await asyncio.sleep(interval)
+    finally:
+        for task in list(tasks):
+            task.cancel()
 
 
 def create_app(config: Config) -> FastAPI:

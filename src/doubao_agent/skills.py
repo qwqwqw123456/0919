@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -124,6 +125,34 @@ class SkillManager:
 
     def get(self, name: str) -> Skill | None:
         return self._skills.get(_clean_name(name))
+
+    def install(self, source: str | Path) -> Skill:
+        """把外部技能目录安装进技能根目录；已存在同名技能时拒绝覆盖。"""
+        src = Path(source)
+        if not (src / "SKILL.md").is_file():
+            raise ValueError(f"不是有效技能目录（缺少 SKILL.md）：{src}")
+        skill = parse_skill(src / "SKILL.md")
+        if skill is None:
+            raise ValueError(f"SKILL.md 解析失败：{src}")
+        dest = self.root / skill.name
+        if dest.exists():
+            raise ValueError(f"技能已存在：{skill.name}")
+        self.root.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dest)
+        self.refresh()
+        return self._skills[skill.name]
+
+    def uninstall(self, name: str) -> bool:
+        """删除已安装技能；只允许删除技能根目录内的目录。"""
+        skill = self.get(name)
+        if skill is None:
+            return False
+        target = skill.directory.resolve()
+        if not target.is_relative_to(self.root.resolve()) or target == self.root.resolve():
+            raise ValueError(f"拒绝删除技能目录之外的路径：{target}")
+        shutil.rmtree(target)
+        self.refresh()
+        return True
 
     def catalog(self) -> str:
         """只列知识型技能；可执行技能已经作为工具进入注册表。"""
