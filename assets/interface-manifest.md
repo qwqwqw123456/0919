@@ -50,6 +50,9 @@
 | `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块；兼容 `content`/`body`、`name`/`heading` 别名，缺字段时错误信息回显实际收到的字段；域归属留空，由 CLI/API 显式指定 |
 | `skill.read` | skill | L0 | `name:str` | 阅读指定技能完整说明与资源清单（渐进式加载） |
 | `skill.text-stats` | skill | L0 | 见技能 `input_schema` | 示例可执行技能，入口 `skills/text-stats/main.py`，统计字符/中文/词/行/高频词 |
+| `skill.pre-write-check` | skill | L0 | `text:str` | 写操作前 D/S/P/A 风险扫描（删除/发送/付费/权限迁移），切句 + 否定紧邻豁免；命中输出 `VERDICT=block`，shell 入口 `skills/pre-write-check/check.sh`，退出码恒 0、结果看文本 |
+| `skill.task-triage` | skill | L0 | `task:str` | 任务轻重分级 L1/L2/L3 与步骤预算（≤5/≤12/≤20）、耗时与 token 档、判定信号；python 入口 `skills/task-triage/main.py` |
+| `skill.safety-checklist` | skill | 知识型 | — | 无入口，不注册为工具；高风险写操作前置清单与留痕协议，经 `skill.read` 阅读 |
 
 ### 3.1 原生兜底工具目录（条件触发）
 
