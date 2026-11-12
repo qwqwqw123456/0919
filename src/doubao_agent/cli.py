@@ -305,6 +305,10 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
             return 0
 
         if args.cmd == "skills":
+            if args.action == "reload":
+                count = await runtime.reload_skills()
+                print(f"已重载 {count} 个 Skill")
+                return 0
             skills = runtime.skills.list()
             if not skills:
                 print(f"技能目录为空：{runtime.skills.root}")
@@ -396,7 +400,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("tools", help="列出统一注册表中的全部工具")
     sub.add_parser("sources", help="检查各接入通道健康状态")
-    sub.add_parser("skills", help="列出已安装的 Skill")
+    skills_parser = sub.add_parser("skills", help="列出 Skill 或热重载技能目录")
+    skills_parser.add_argument(
+        "action", nargs="?", choices=["list", "reload"], default="list", help="list | reload"
+    )
     sub.add_parser("sessions", help="列出最近的会话")
 
     resume_parser = sub.add_parser("resume", help="从检查点恢复会话")

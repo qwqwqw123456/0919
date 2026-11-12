@@ -423,7 +423,21 @@ class Agent:
             error=result.error,
             elapsed_ms=result.elapsed_ms,
         )
+        self._register_artifacts(session_id)
         return result
+
+    def _register_artifacts(self, session_id: str) -> None:
+        """把 runs/<session>/ 下新产生的交付文件登记进 artifacts，供会话检索与恢复。"""
+        root = self.audit.runs_dir / session_id
+        if not root.is_dir():
+            return
+        known = {row["path"] for row in self.sessions.artifacts(session_id)}
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.name == "audit.jsonl":
+                continue
+            resolved = str(path)
+            if resolved not in known:
+                self.sessions.add_artifact(session_id, resolved)
 
     def _record_recipe(
         self,

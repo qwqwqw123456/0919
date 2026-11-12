@@ -20,6 +20,9 @@ class CapabilityRegistry:
     def add_source(self, source: CapabilitySource) -> None:
         self._sources[source.name] = source
 
+    def has_source(self, name: str) -> bool:
+        return name in self._sources
+
     @property
     def errors(self) -> dict[str, str]:
         return dict(self._errors)

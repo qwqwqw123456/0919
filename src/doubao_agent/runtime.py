@@ -95,7 +95,7 @@ class Runtime:
 
         await registry.refresh()
 
-        policy = PermissionPolicy(config.permission_mode, approver)
+        policy = PermissionPolicy(config.permission_mode, approver, config.auto_approve)
         sessions = SessionStore(config.db_path)
         memory = MemoryStore(config.db_path)
         recipes = RecipeStore(config.db_path)
@@ -140,6 +140,14 @@ class Runtime:
         self.knowledge.close()
         self.recipes.close()
         self.scheduler.close()
+
+    async def reload_skills(self) -> int:
+        """重新扫描技能目录并热更新工具注册表（新增/删除技能无需重启）。"""
+        count = self.skills.refresh()
+        if count and not self.registry.has_source("skill"):
+            self.registry.add_source(SkillSource(self.skills))
+        await self.registry.refresh()
+        return count
 
     def spawn_agent(self) -> Agent:
         """创建一个独立 Agent 实例用于并行协同。

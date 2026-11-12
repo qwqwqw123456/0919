@@ -908,3 +908,117 @@ async def test_coordinator_runs_subtasks_in_parallel() -> None:
     assert FakeAgent.max_active == 3
 
 
+
+async def test_policy_rule_preauthorizes_without_approver() -> None:
+    policy = PermissionPolicy(
+        "guarded",
+        rules=[
+            {
+                "tool": "send_message",
+                "arguments": {"target_id": "self"},
+                "risk": "L2",
+                "reason": "仅本人",
+            }
+        ],
+    )
+    spec = ToolSpec(name="send_message", description="send", risk=Risk.IRREVERSIBLE)
+
+    hit = await policy.authorize(
+        spec, ToolCall(name="send_message", arguments={"target_id": "self"})
+    )
+    assert hit.allowed is True
+    assert hit.needs_approval is False
+    assert "仅本人" in hit.reason
+
+    miss = await policy.authorize(
+        spec, ToolCall(name="send_message", arguments={"target_id": "other"})
+    )
+    assert miss.allowed is False
+
+
+async def test_policy_rule_respects_risk_ceiling() -> None:
+    policy = PermissionPolicy("guarded", rules=[{"tool": "*", "risk": "L1"}])
+    spec = ToolSpec(name="crm.delete", description="delete", risk=Risk.SENIOR)
+    decision = await policy.authorize(spec, ToolCall(name="crm.delete"))
+    assert decision.allowed is False
+
+
+async def test_tool_artifacts_are_registered(tmp_path) -> None:
+    class WritingSource(FakeSource):
+        session_id = ""
+
+        async def call_tool(self, call: ToolCall) -> ToolResult:
+            target = tmp_path / "runs" / self.session_id / "report.txt"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("ok", encoding="utf-8")
+            return ToolResult(call_id=call.call_id, ok=True, content="written")
+
+    source = WritingSource()
+    registry = await _registry(source)
+    provider = MockProvider(
+        script=[
+            {"content": None, "tool_calls": [{"id": "c1", "name": "fake.ping", "arguments": {}}]},
+            {"content": "完成", "tool_calls": []},
+        ]
+    )
+    db = tmp_path / "agent.db"
+    sessions = SessionStore(db)
+    agent = Agent(
+        registry=registry,
+        provider=provider,
+        policy=PermissionPolicy("auto"),
+        sessions=sessions,
+        audit=AuditLog(tmp_path / "runs"),
+        memory=MemoryStore(db),
+        max_steps=4,
+    )
+
+    def on_event(event: dict) -> None:
+        if event.get("type") == "start":
+            source.session_id = event["session"]
+
+    result = await agent.run("写报告", on_event=on_event)
+    assert result["status"] == "completed"
+
+    paths = [row["path"] for row in sessions.artifacts(result["session_id"])]
+    assert str(tmp_path / "runs" / result["session_id"] / "report.txt") in paths
+    assert all(not path.endswith("audit.jsonl") for path in paths)
+
+
+def test_agent_yaml_enables_policy_and_planning() -> None:
+    from pathlib import Path
+
+    from doubao_agent.config import load_config
+
+    cfg = load_config(Path(__file__).resolve().parents[1] / "agent.yaml")
+    assert cfg.planning_enabled is True
+    assert cfg.auto_approve and cfg.auto_approve[0]["tool"] == "send_message"
+
+
+async def test_runtime_reload_skills_picks_up_new_skill(tmp_path) -> None:
+    from doubao_agent.config import Config
+    from doubao_agent.runtime import Runtime
+
+    cfg = Config(
+        workspace=tmp_path,
+        runs_dir=tmp_path / "runs",
+        db_path=tmp_path / "agent.db",
+        skills_dir=tmp_path / "skills",
+        scheduler_enabled=False,
+        planning_enabled=False,
+        model={"provider": "mock"},
+    )
+    runtime = await Runtime.build(cfg)
+    try:
+        assert runtime.registry.get("skill.read") is None
+
+        skill_dir = tmp_path / "skills" / "demo"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: demo\ndescription: 演示技能\n---\n\n正文", "utf-8"
+        )
+
+        assert await runtime.reload_skills() == 1
+        assert runtime.registry.get("skill.read") is not None
+    finally:
+        await runtime.aclose()

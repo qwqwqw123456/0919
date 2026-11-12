@@ -44,6 +44,7 @@ class Config:
     port: int = DEFAULT_PORT
     model: dict[str, Any] = field(default_factory=dict)
     bridge: dict[str, Any] = field(default_factory=dict)
+    auto_approve: list[dict[str, Any]] = field(default_factory=list)  # 规则预授权，替代人工审批
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     api_sources: list[ApiSourceConfig] = field(default_factory=list)
 
@@ -107,6 +108,9 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.port = int(data.get("port", cfg.port))
         cfg.model = dict(data.get("model") or _default_model())
         cfg.bridge = dict(data.get("bridge") or {})
+        cfg.auto_approve = [
+            dict(item) for item in data.get("auto_approve", []) if isinstance(item, dict)
+        ]
         cfg.mcp_servers = _parse_mcp(data.get("mcp_servers", []))
         cfg.api_sources = [
             ApiSourceConfig(name=i["name"], spec_path=i["spec"])

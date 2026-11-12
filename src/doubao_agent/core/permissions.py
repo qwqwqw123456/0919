@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Awaitable, Callable
+from fnmatch import fnmatchcase
+from typing import Any, Awaitable, Callable
 
 from ..types import Risk, ToolCall, ToolSpec
 
 Approver = Callable[[ToolSpec, ToolCall, str], Awaitable[bool]]
+
+_RISK_RANK = {
+    Risk.READ: 0,
+    Risk.REVERSIBLE: 1,
+    Risk.IRREVERSIBLE: 2,
+    Risk.SENIOR: 3,
+}
 
 
 class PermissionMode(str, Enum):
@@ -22,15 +30,64 @@ class Decision:
     reason: str = ""
 
 
-class PermissionPolicy:
-    """Reversibility-based gating instead of an allowlist."""
+@dataclass(frozen=True)
+class PolicyRule:
+    """规则预授权：命中即放行，替代无人值守场景下的人工审批。
 
-    def __init__(self, mode: str | PermissionMode = PermissionMode.GUARDED,
-                 approver: Approver | None = None) -> None:
+    tool 支持通配符（如 `send_*`）；risk 是允许的最高风险等级；
+    arguments 是必须全部相等的参数约束（如 {"target_id": "self"}）。
+    """
+
+    tool: str = "*"
+    risk: str = Risk.SENIOR.value
+    arguments: dict[str, Any] = field(default_factory=dict)
+    reason: str = "预授权规则"
+
+    @classmethod
+    def from_dict(cls, item: dict[str, Any]) -> "PolicyRule":
+        return cls(
+            tool=str(item.get("tool") or "*"),
+            risk=str(item.get("risk") or Risk.SENIOR.value).upper(),
+            arguments=dict(item.get("arguments") or {}),
+            reason=str(item.get("reason") or "预授权规则"),
+        )
+
+    def allows(self, spec: ToolSpec, call: ToolCall) -> bool:
+        if not fnmatchcase(spec.name, self.tool):
+            return False
+        try:
+            ceiling = _RISK_RANK[Risk(self.risk)]
+        except (KeyError, ValueError):
+            return False
+        if _RISK_RANK[spec.risk] > ceiling:
+            return False
+        return all(call.arguments.get(key) == value for key, value in self.arguments.items())
+
+
+class PermissionPolicy:
+    """Reversibility-based gating plus explicit preauthorization rules."""
+
+    def __init__(
+        self,
+        mode: str | PermissionMode = PermissionMode.GUARDED,
+        approver: Approver | None = None,
+        rules: list[dict[str, Any] | PolicyRule] | None = None,
+    ) -> None:
         self.mode = PermissionMode(mode)
         self.approver = approver
+        self.rules = [
+            rule if isinstance(rule, PolicyRule) else PolicyRule.from_dict(rule)
+            for rule in rules or []
+        ]
+
+    def _match_rule(self, spec: ToolSpec, call: ToolCall) -> PolicyRule | None:
+        return next((rule for rule in self.rules if rule.allows(spec, call)), None)
 
     async def authorize(self, spec: ToolSpec, call: ToolCall) -> Decision:
+        rule = self._match_rule(spec, call)
+        if rule is not None:
+            return Decision(True, False, f"policy: {rule.reason}")
+
         risk = spec.risk
 
         if self.mode is PermissionMode.AUTO:
