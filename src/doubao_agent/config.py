@@ -28,6 +28,8 @@ def _load_env_file(path: Path) -> None:
         return
     for line in lines:
         line = line.strip()
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")

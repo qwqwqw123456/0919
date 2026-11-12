@@ -153,6 +153,19 @@ def test_env_local_does_not_override_existing(tmp_path, monkeypatch) -> None:
     assert os.environ["AGENT_TEST_ENV_LOCAL"] == "already_set"
 
 
+def test_env_local_strips_export_prefix(tmp_path, monkeypatch) -> None:
+    from doubao_agent.config import load_config
+
+    monkeypatch.setenv("AGENT_WORKSPACE", str(tmp_path))
+    monkeypatch.delenv("AGENT_TEST_ENV_LOCAL", raising=False)
+    (tmp_path / ".env.local").write_text(
+        "export AGENT_TEST_ENV_LOCAL=from_export_prefix\n", encoding="utf-8"
+    )
+
+    load_config(tmp_path / "agent.yaml")
+    assert os.environ["AGENT_TEST_ENV_LOCAL"] == "from_export_prefix"
+
+
 async def test_scheduler_dispatches_concurrently() -> None:
     state = {"active": 0, "max_active": 0, "started": 0}
 

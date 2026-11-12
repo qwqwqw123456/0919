@@ -10,10 +10,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
 # 2. 密钥（不要写进仓库文件；.env.local 已被 .gitignore 排除）
+# 运行时启动自动读取 .env.local 注入环境变量，无需手动 source。
 cat > .env.local <<'EOF'
-export OPENAI_API_KEY='你的密钥'
+OPENAI_API_KEY='你的密钥'
 EOF
-set -a && . ./.env.local && set +a
 
 # 3. 配置
 cp agent.example.yaml agent.yaml   # 按需修改 model 段
@@ -35,11 +35,11 @@ cp agent.example.yaml agent.yaml   # 按需修改 model 段
 ## 常用命令
 
 ```bash
-doubao-agent run "任务描述" [--json] [--dry-run]
-doubao-agent resume <会话ID> [--approval <单号>]
-doubao-agent show <会话ID>
+doubao-agent run "任务描述" [--session <ID>] [--no-record] [--image <路径>]
+doubao-agent resume <会话ID>
 doubao-agent sessions
-doubao-agent tools | sources | skills | skills reload
+doubao-agent tools | sources | skills [reload|install <目录>|uninstall <名称>]
+doubao-agent mcp list | mcp add <名称> --url <地址> | mcp remove <名称>
 doubao-agent state show
 doubao-agent longterm stats
 doubao-agent knowledge domains
