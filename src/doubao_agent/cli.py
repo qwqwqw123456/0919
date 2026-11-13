@@ -877,6 +877,10 @@ def main(argv: list[str] | None = None) -> int:
         default="127.0.0.1",
         help="监听地址；默认仅本机。非回环地址必须配置 auth_token",
     )
+    sub.add_parser(
+        "mcp-serve",
+        help="以标准 MCP stdio server 暴露统一工具注册表（供 traecli mcp add 挂载）",
+    )
 
     daemon_parser = sub.add_parser("daemon", help="常驻守护：start / stop / status")
     daemon_parser.add_argument("action", choices=["start", "stop", "status"])
@@ -897,6 +901,11 @@ def main(argv: list[str] | None = None) -> int:
     elif extra:
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
     cfg = load_config(args.config)
+
+    if args.cmd == "mcp-serve":
+        from .mcp_server import serve_stdio
+
+        return asyncio.run(serve_stdio(cfg))
 
     if args.cmd == "daemon":
         return _daemon_command(args, cfg)
