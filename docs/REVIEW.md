@@ -163,7 +163,7 @@
 
 ### 当前卡点
 
-- **鉴权**：`doctor` 显示 `Auth: required trae, status: not_logged_in`。真实模型任务在调用层校验；无头 `exec` 先撞 CLI 内置鉴权（解析内网 `code.byted.org` 失败 / 代理 502）。登录方式：交互 `traecli login`（浏览器/设备码）、PAT 注入环境变量 `TRAE_ACCESS_TOKEN`、端点可用 `TRAE_API_BASE_URL` 覆盖。
+- **鉴权**：`doctor` 显示 `Auth: required trae, status: not_logged_in`；`login status` 同为未登录。真实模型任务在调用层校验。无头 `exec` 默认走 CLI 内置 git 鉴权引导（内网 `code.byted.org/builtin/cli-authenticate.git`），当前出口 DNS 解析失败、代理 CONNECT 502，exit 1，未进模型层。PAT 路径可绕开该 git 引导：`traecli login --with-trae-pat` 读环境变量 `TRAECLI_PERSONAL_ACCESS_TOKEN`（未设则从 stdin 读），直连令牌交换端点；占位令牌交换报 `30021 网络异常`。默认端点 `api.trae.com.cn`（个人版）/ `api.enterprise.trae.cn`（企业版）经代理可达（根路径 404 属正常）；端点可用 `TRAE_API_BASE_URL` 覆盖，运行时令牌环境变量为 `TRAE_ACCESS_TOKEN`。企业 SSO 走 `traecli login --enterprise`。
 - **协议适配差距**：本仓库 `sources/mcp.py` 只认标准 MCP（stdio / SSE / Streamable HTTP）；接 Trae 的 exec-server/ACP 需另写一层 JSON-RPC / ACP 客户端适配，不能直接挂进现有 MCP 通道。
 - **契约参考**：`traecli app-server generate-json-schema --out <DIR>` 可导出协议 JSON Schema（本机临时目录，未纳入仓库）；协议含 initialize 握手、会话/命令执行/文件系统/配置/审批/MCP elicitation 等方法，服务端主动推消息 delta、命令输出、FS 变更等通知。
 
