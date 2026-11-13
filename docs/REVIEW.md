@@ -166,11 +166,12 @@
 - **鉴权**：`doctor` 显示 `Auth: required trae, status: not_logged_in`；`login status` 同为未登录。真实模型任务在调用层校验。无头 `exec` 默认走 CLI 内置 git 鉴权引导（内网 `code.byted.org/builtin/cli-authenticate.git`），当前出口 DNS 解析失败、代理 CONNECT 502，exit 1，未进模型层。PAT 路径可绕开该 git 引导：`traecli login --with-trae-pat` 读环境变量 `TRAECLI_PERSONAL_ACCESS_TOKEN`（未设则从 stdin 读），直连令牌交换端点；占位令牌交换报 `30021 网络异常`。端点 `api.trae.com.cn` / `api.enterprise.trae.cn` 经代理可达（根路径 404 属正常；个人/企业归属以后台为准，CLI help 未标注）；端点可用 `TRAE_API_BASE_URL` 覆盖，运行时令牌环境变量为 `TRAE_ACCESS_TOKEN`。企业 SSO 走 `traecli login --enterprise`。
 - **企业 SSO 交互实测（2026-11-13）**：`traecli login --enterprise` 在本机起临时回调服务（`http://127.0.0.1:<随机端口>/authorize`），浏览器跳转 `console.enterprise.trae.cn/authorization`；所填账号在企业版登录页被拒，页面原文「当前邮箱未关联企业账号……确认管理员已完成企业注册并邀请你加入」。判定为账号未被企业组织收录（非网络/密码错误）。`login --help` 显示该 0.214.1 为 ToB 构建，登录面仅 `--enterprise`（企业 SSO）、`--with-trae-pat`（ToB PAT）、`--base-url`（企业 API base URL，供 PAT 登录），无个人版登录开关。
 - **官方登录门槛（2026-11-13 核实 docs.trae.cn / 火山引擎《CLI 登录令牌》）**：CLI 登录令牌套餐要求**旗舰版**，在 TRAE 企业版控制台「个人信息 > 访问令牌 > CLI 登录令牌」生成，令牌前缀 `trae-lt-`、仅展示一次、仅限创建者本人；环境变量 `TRAECLI_PERSONAL_ACCESS_TOKEN`，组织自定义 API 域名另配 `TRAECLI_HOST`（与 CLI 选项 `--base-url` 对应同一覆盖项）。官方文档未提供手机号验证码个人账号登录 CLI 的路径。
+- **账号类型判定（2026-11-13）**：当前可用账号为普通个人账号。两篇 CLI 文档（`trae-cli` / `trae-code-cli`）共用同一安装脚本 `install_v2.sh` 与同一套登录面，无独立个人版 CLI 包；社区案例中个人 ultra 版切 CLI 同样被拦（页面「当前企业账号暂不支持 TRAE CLI 使用，请联系管理员升级套餐或使用 TRAE IDE」），技术支持指向企业版。结论：CLI 能力挂在企业版套餐上，普通个人账号在本 ToB CLI 下无法登录，属产品账号/套餐限制，本地配置、端点或网络不可绕过。
 - **协议适配差距**：本仓库 `sources/mcp.py` 只认标准 MCP（stdio / SSE / Streamable HTTP）；接 Trae 的 exec-server/ACP 需另写一层 JSON-RPC / ACP 客户端适配，不能直接挂进现有 MCP 通道。
 - **契约参考**：`traecli app-server generate-json-schema --out <DIR>` 可导出协议 JSON Schema（本机临时目录，未纳入仓库）；协议含 initialize 握手、会话/命令执行/文件系统/配置/审批/MCP elicitation 等方法，服务端主动推消息 delta、命令输出、FS 变更等通知。
 
 ### 双向打通的最小路径
 
-1. 先解决 Trae 登录态（PAT 或交互登录），在当前出口网络下验证一次无头 `traecli exec --json` 能跑通真实任务。
+1. **前置阻塞**：需先有一个已加入企业组织、套餐含 CLI 权限的账号（旗舰版可生成 `trae-lt-` 令牌，或由管理员加入后走 SSO）；登录态建立后，再在当前出口网络下验证一次无头 `traecli exec --json` 能跑通真实任务。普通个人账号不满足此前置条件。
 2. 方向 A（Trae 调我方工具）：在我方补一个标准 MCP server 适配层，把注册表 `ToolSpec` 暴露成 MCP tools，再由 `traecli mcp add` 挂入。
 3. 方向 B（我方调 Trae）：在我方补 exec-server JSON-RPC 客户端（或 ACP 客户端），按导出的 schema 走 initialize → 会话创建 → 任务下发 → 通知接收；这对应 G9「A2A 跨进程协议」缺口。
