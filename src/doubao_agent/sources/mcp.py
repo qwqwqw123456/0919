@@ -43,7 +43,7 @@ async def probe_http_mcp(
         "params": {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "doubao-agent", "version": "0.1.0"},
+            "clientInfo": {"name": "doubao-agent", "version": "0.2.0"},
         },
     }
     headers = {"Accept": "application/json, text/event-stream"}

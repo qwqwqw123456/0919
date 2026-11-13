@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from .core.limits import RateLimiter
 from .sources.base import CapabilitySource
 from .types import ToolCall, ToolResult, ToolSpec
 from .utils import dumps
@@ -11,11 +12,12 @@ from .utils import dumps
 class CapabilityRegistry:
     """Single entry point for every capability, regardless of its channel."""
 
-    def __init__(self) -> None:
+    def __init__(self, rate_limiter: RateLimiter | None = None) -> None:
         self._sources: dict[str, CapabilitySource] = {}
         self._specs: dict[str, ToolSpec] = {}
         self._dispatch: dict[str, tuple[CapabilitySource, str]] = {}
         self._errors: dict[str, str] = {}
+        self.rate_limiter = rate_limiter
 
     def add_source(self, source: CapabilitySource) -> None:
         self._sources[source.name] = source
@@ -68,6 +70,15 @@ class CapabilityRegistry:
         if key is None:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown tool: {call.name}")
         source, original = self._dispatch[key]
+        if self.rate_limiter is not None and not self.rate_limiter.allow(source.name):
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                error=(
+                    f"rate limited: {source.name} 超过 "
+                    f"{self.rate_limiter.limit_for(source.name)} 次/分钟"
+                ),
+            )
         return await source.call_tool(
             ToolCall(
                 name=original,

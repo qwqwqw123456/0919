@@ -44,6 +44,16 @@ def test_query_token_sets_cookie(tmp_path) -> None:
         assert client.get("/api/tools").status_code == 200
 
 
+def test_metrics_and_trace_endpoints(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        metrics = client.get("/api/metrics")
+        assert metrics.status_code == 200
+        assert metrics.json()["spans"] == 0
+        trace = client.get("/api/sessions/demo/trace")
+        assert trace.status_code == 200
+        assert trace.json() == []
+
+
 def test_run_endpoint_rejects_without_token(tmp_path) -> None:
     with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
         response = client.post("/api/run", json={"task": "查一下资料"})

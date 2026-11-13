@@ -42,6 +42,10 @@ def _print_event(event: dict[str, Any]) -> None:
         print(f"\n拆分为 {event.get('count')} 个子任务：", file=sys.stderr)
         for index, subtask in enumerate(event.get("subtasks", []), 1):
             print(f"  {index}. {subtask}", file=sys.stderr)
+    elif kind == "review":
+        conflicts = event.get("conflicts") or []
+        suffix = f"；冲突：{'；'.join(conflicts)}" if conflicts else ""
+        print(f"\n[审阅] {event.get('verdict')}{suffix}", file=sys.stderr)
     elif kind == "finish":
         print("\n" + str(event.get("answer", "")), file=sys.stderr)
 
@@ -60,6 +64,18 @@ def _audit_command(args: argparse.Namespace, cfg: Config) -> int:
             return 0
         for session_id in ids:
             print(session_id)
+        return 0
+
+    if args.action == "export":
+        if not args.session:
+            print("用法: audit export <session> [--out 路径]", file=sys.stderr)
+            return 2
+        try:
+            path, count = log.export(args.session, args.out)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"已导出 {count} 条 → {path}")
         return 0
 
     targets = [args.session] if args.session else log.sessions()
@@ -164,6 +180,11 @@ def _memory_command(memory, args: argparse.Namespace) -> int:
             return 0
         for row in rows:
             print(f"#{row['id']}\t{row['kind']}\tw={row['weight']:.1f}\t{row['text']}")
+        return 0
+
+    if args.action == "decay":
+        count = memory.decay(half_life_days=args.days)
+        print(f"已按半衰期 {args.days} 天衰减 {count} 条记忆")
         return 0
 
     if args.action == "forget":
@@ -449,8 +470,16 @@ async def _parallel_command(runtime: Runtime, args: argparse.Namespace) -> int:
     if getattr(args, "subtasks", None):
         subtasks = [s.strip() for s in args.subtasks.split(",") if s.strip()]
 
-    result = await coordinator.run_parallel(args.task, subtasks=subtasks, on_event=_print_event)
+    result = await coordinator.run_parallel(
+        args.task,
+        subtasks=subtasks,
+        on_event=_print_event,
+        review=getattr(args, "review", False),
+    )
     print(f"\n状态={result['status']} 成功={result['completed']}/{result['total']}")
+    if result.get("review"):
+        conflicts = result["review"]["conflicts"]
+        print(f"审阅={result['review']['verdict']} 冲突={len(conflicts)}")
     return 0 if result["status"] == "completed" else 1
 
 
@@ -567,6 +596,28 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "mcp":
             return _mcp_command(runtime, args)
 
+        if args.cmd == "metrics":
+            session = getattr(args, "session", None)
+            if getattr(args, "detail", False):
+                if not session:
+                    print("--detail 需要配合 --session 使用", file=sys.stderr)
+                    return 2
+                for span in runtime.telemetry.list(session):
+                    mark = "ok" if span["ok"] else "fail"
+                    print(
+                        f"{span['kind']}\t{span['duration_ms']}ms\t{mark}\t"
+                        f"{span['name']}\t{span['attributes']}"
+                    )
+                return 0
+            print(
+                json.dumps(
+                    runtime.telemetry.summary(session),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+
         if args.cmd == "run":
             if getattr(args, "no_record", False):
                 runtime.config.record_recipes = False
@@ -608,6 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     mcp_parser.add_argument("--transport", default=None, help="http | sse，默认 http")
     mcp_parser.add_argument("--command", default=None, help="stdio 启动命令")
     mcp_parser.add_argument("--args", nargs="*", default=None, help="stdio 命令参数")
+    metrics_parser = sub.add_parser("metrics", help="可观测指标：span 汇总 / 慢调用 / 失败数")
+    metrics_parser.add_argument("--session", default=None, help="只看指定会话")
+    metrics_parser.add_argument("--detail", action="store_true", help="按时间顺序列出该会话全部 span")
     sub.add_parser("sessions", help="列出最近的会话")
 
     resume_parser = sub.add_parser("resume", help="从检查点恢复会话")
@@ -626,10 +680,13 @@ def main(argv: list[str] | None = None) -> int:
     replay_parser.add_argument("recipe_id", type=int, help="配方编号")
 
     memory_parser = sub.add_parser("memory", help="长期记忆：查看 / 写入 / 检索 / 遗忘 / 统计")
-    memory_parser.add_argument("action", choices=["list", "add", "search", "forget", "stats"])
+    memory_parser.add_argument(
+        "action", choices=["list", "add", "search", "forget", "stats", "decay"]
+    )
     memory_parser.add_argument("value", nargs="?", default=None)
     memory_parser.add_argument("--kind", default="fact", choices=list(MEMORY_KINDS))
     memory_parser.add_argument("--limit", type=int, default=20)
+    memory_parser.add_argument("--days", type=float, default=30.0, help="衰减半衰期（天，仅 decay）")
 
     schedule_parser = sub.add_parser("schedule", help="cron 定时任务：add / list / remove / enable / disable / run")
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "enable", "disable", "run"])
@@ -676,6 +733,7 @@ def main(argv: list[str] | None = None) -> int:
     parallel_parser = sub.add_parser("parallel", help="并行协同：拆解任务、并发执行子任务并汇总")
     parallel_parser.add_argument("task")
     parallel_parser.add_argument("--subtasks", default=None, help="逗号分隔的子任务列表（省略则自动拆解）")
+    parallel_parser.add_argument("--review", action="store_true", help="追加审阅者：合并结果并指出冲突")
 
     serve_parser = sub.add_parser("serve", help="启动本地控制台")
     serve_parser.add_argument("--port", type=int, default=None)
@@ -685,8 +743,11 @@ def main(argv: list[str] | None = None) -> int:
     daemon_parser.add_argument("--port", type=int, default=None)
 
     audit_parser = sub.add_parser("audit", help="审计：校验哈希链 / 列出有审计的会话")
-    audit_parser.add_argument("action", nargs="?", choices=["verify", "sessions"], default="verify")
+    audit_parser.add_argument(
+        "action", nargs="?", choices=["verify", "sessions", "export"], default="verify"
+    )
     audit_parser.add_argument("session", nargs="?", default=None, help="只校验指定会话")
+    audit_parser.add_argument("--out", default=None, help="导出路径（默认 runs/<session>/audit.export.jsonl）")
 
     args, extra = parser.parse_known_args(argv)
     if extra and args.cmd in ("memory", "knowledge"):

@@ -20,6 +20,29 @@ DOMAINS: dict[str, str] = {
 }
 
 
+# 知识域路由关键词：查询命中哪一域的词最多，就优先在该域检索；全部为 0 时退回全库。
+_DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "01": ("思维", "认知", "决策", "逻辑", "学习", "记忆", "专注", "偏见", "判断"),
+    "02": ("习惯", "自律", "情绪", "目标", "复盘", "成长", "时间管理", "精力"),
+    "03": ("投资", "财务", "商业", "创业", "收入", "成本", "盈利", "定价", "变现", "融资"),
+    "04": ("沟通", "关系", "团队", "领导", "谈判", "冲突", "社交", "协作"),
+    "05": ("行业", "赛道", "竞争", "趋势", "产业链", "格局", "市场份额"),
+    "06": ("工具", "软件", "教程", "文档", "配置", "代码", "接口", "模型", "agent"),
+    "07": ("政策", "法规", "补贴", "监管", "标准", "政府", "申报", "合规"),
+}
+
+
+def route_domain(query: str) -> str:
+    """按关键词把查询路由到知识域；无法判断返回空串（表示全库检索）。"""
+    text = (query or "").lower()
+    best, best_score = "", 0
+    for code, keywords in _DOMAIN_KEYWORDS.items():
+        score = sum(text.count(word) for word in keywords)
+        if score > best_score:
+            best, best_score = code, score
+    return best
+
+
 def normalize_domain(value: str | None) -> str:
     """把 '01' / '1' / '认知与思维' / '01 认知与思维' 归一成 '01'；空值放行。"""
     text = (value or "").strip()
@@ -166,7 +189,7 @@ class KnowledgeStore:
         query = query.strip()
         if not query:
             return []
-        code = normalize_domain(domain)
+        code = self._domain_code(query, domain)
         rows = [row for row in self._rows() if not code or row["domain"] == code]
         if self.embed is not None:
             query_vec = self.embed(query)
@@ -186,7 +209,7 @@ class KnowledgeStore:
             return []
         if self.aembed is None:
             return self.search(query, limit=limit, per_doc=per_doc, domain=domain)
-        code = normalize_domain(domain)
+        code = self._domain_code(query, domain)
         rows = [row for row in self._rows() if not code or row["domain"] == code]
         try:
             query_vec = await self.aembed(query)
@@ -196,6 +219,13 @@ class KnowledgeStore:
         except Exception:  # noqa: BLE001 - 语义检索失败不应让检索整体失败
             scored = [(_score_chunk(query, row["text"]), row) for row in rows]
         return self._pick(scored, limit, per_doc)
+
+    @staticmethod
+    def _domain_code(query: str, domain: str | None) -> str:
+        """domain='auto' 时按查询自动路由；其余按显式域名归一。"""
+        if (domain or "").strip().lower() == "auto":
+            return route_domain(query)
+        return normalize_domain(domain)
 
     def _rows(self) -> list[sqlite3.Row]:
         with self._lock:

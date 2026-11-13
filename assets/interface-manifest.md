@@ -1,8 +1,8 @@
-# 接口清单 interface-manifest（doubao-agent v0.1.0 · 2026-11-12）
+# 接口清单 interface-manifest（doubao-agent v0.2.0 · 2026-11-13）
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 41 个 Python 文件 / 6341 行；测试 19 个文件、99 passed。注册表工具随通道装配，本机当前实跑：builtin 2 + knowledge 2 + mcp 11；`skill` 通道仅在技能目录扫描到至少一个技能时挂载（见第 3 节）；原生兜底工具 17 个（条件触发，见 3.1）。
+> 实跑基线：`src/` 下 44 个 Python 文件 / 7077 行；测试 20 个文件、112 passed。注册表工具随通道装配，本机当前实跑：builtin 2 + knowledge 2 + skill 1；`mcp` 通道在本沙箱不可达（8091 未开放）。原生兜底工具 17 个（条件触发，见 3.1）。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -11,13 +11,14 @@
 
 | 层 | 形态 | 说明 |
 | --- | --- | --- |
-| CLI | `doubao-agent <子命令> [参数]` | 本地命令行，覆盖运行、记忆、知识、调度、配方、并行、技能/MCP 管理、服务与守护 |
-| 控制台 HTTP | FastAPI 路由 `/api/*` + SSE `/api/events` | 本地 Web 控制台，工具/技能/知识/会话/审计/调度/并行 |
+| CLI | `doubao-agent <子命令> [参数]` | 本地命令行，覆盖运行、记忆、知识、调度、配方、并行、技能/MCP 管理、指标、服务与守护 |
+| 控制台 HTTP | FastAPI 路由 `/api/*` + SSE `/api/events` | 本地 Web 控制台，工具/技能/知识/会话/审计/调度/并行/指标与追踪 |
 | Agent 内核 | `Agent.run()` 规划-执行-观察-反思主循环 | 单次入口规划（可选）→ 工具执行 → 结果归一化 → 记忆/配方沉淀 |
 | 能力注册表 | `CapabilityRegistry` 聚合多通道工具 | 上层只认 `ToolSpec`，不关心工具来自 MCP / API / 浏览器 / 桌面 / 原生 / 脚本 / 技能 / 知识 |
 | 模型供给 | `host / openai / mock` 三档 Provider | 统一 `complete(messages, tools) -> {content, tool_calls, usage}` |
 | 知识向量 | 可选宿主 embedding（`BridgeEmbedding`） | 桥清单暴露 `embed` 能力才启用；否则知识库保持关键词/混合检索，不伪造向量 |
-| 持久化 | SQLite + JSONL 审计 | 三层记忆（工作记忆 / 长期经验 / 知识域）、会话与检查点、配方、调度，断连可续跑 |
+| 持久化 | SQLite + JSONL 审计 | 三层记忆、会话与检查点、配方、调度、工具执行日志（`tool_runs`）与 span 追踪（`spans`）；断连可续跑 |
+| 可靠性 | `ToolJournal` + 重试策略 | 幂等工具按参数指纹重放，只读/可逆写不重复执行；瞬时错误指数退避重试，受 `tool_retries` 控制 |
 
 ---
 
@@ -46,7 +47,7 @@
 | --- | --- | --- | --- | --- |
 | `script.run_python` | builtin | L1 | `code:str`，可选 `cwd`、`timeout` | 执行 Python 代码，print 输出关键结果 |
 | `script.run_shell` | builtin | L1 | `command:str`，可选 `cwd`、`timeout` | 执行非交互 bash 命令 |
-| `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4` | 通道内走异步 `asearch`；有 `embed`/`aembed` 时切余弦向量，异步 embedding 失败自动退回关键词 + 字符 bigram 混合检索；分块向量按文本 sha1 缓存 |
+| `knowledge.search` | knowledge | L0 | `query:str`，可选 `limit:int=4`、`domain:str` | 通道内走异步 `asearch`；`domain=auto` 时按关键词自动路由到七域之一（`route_domain`），留空全库；有 `embed`/`aembed` 时切余弦向量，异步 embedding 失败自动退回关键词 + 字符 bigram 混合检索；分块向量按文本 sha1 缓存 |
 | `knowledge.add` | knowledge | L1 | `title:str`、`text:str`，可选 `source:str` | 写入知识库并自动分块；兼容 `content`/`body`、`name`/`heading` 别名，缺字段时错误信息回显实际收到的字段；域归属留空，由 CLI/API 显式指定 |
 | `skill.read` | skill | L0 | `name:str` | 阅读指定技能完整说明与资源清单（渐进式加载） |
 | `skill.text-stats` | skill | L0 | 见技能 `input_schema` | 示例可执行技能，入口 `skills/text-stats/main.py`，统计字符/中文/词/行/高频词 |
@@ -66,7 +67,7 @@
 
 ---
 
-## 4. CLI 命令（`cli.py`，18 个子命令）
+## 4. CLI 命令（`cli.py`，19 个子命令）
 
 全局选项：`--config <路径>`；配置路径依次取 `--config` → 环境变量 `DOUBAO_AGENT_CONFIG` → `<workspace>/agent.yaml`，不存在时回退 legacy `/workspace/agent.yaml`。`workspace` 默认取 `AGENT_WORKSPACE` 或当前目录。
 
@@ -76,18 +77,19 @@
 | `sources` | — | 检查各接入通道健康状态 |
 | `skills` | `[list\|reload\|install\|uninstall]`；`target?` | 列出技能；`reload` 热扫描并刷新注册表；`install <目录>` 校验 `SKILL.md` 后复制进 `skills_dir`（同名拒绝覆盖）；`uninstall <名称>` 仅删技能根目录内的目录，越界拒绝 |
 | `mcp` | `[list\|add\|remove]`；`name?`；`--url`；`--transport`；`--command`；`--args` | `list` 打印生效的 MCP（含启动时合并的本地登记）；`add/remove` 只写 `<db_path 所在目录>/mcp.local.yaml`，下次启动合并进 `mcp_servers`，不改 `agent.yaml`；stdio 用 `--command/--args`，http/sse 用 `--url/--transport`（默认 http） |
+| `metrics` | `--session <id>?`；`--detail` | 输出 span 汇总：总数、失败数、总耗时、平均耗时、按类型/工具的计数与最慢 5 条；省略 `--session` 为全局视图；`--detail` 按顺序列出该会话全部 span |
 | `sessions` | — | 列出最近会话 |
 | `resume` | `session_id` | 从检查点恢复会话 |
 | `run` | `task`；`--session <id>`；`--no-record`；`--image <路径>`（可重复） | 执行一个任务；`--no-record` 不录制配方；`--image` 把本地图片编码为 OpenAI 多模态 `image_url`（单张 ≤5MB，需模型支持视觉） |
 | `recipes` | — | 列出已录制配方 |
 | `replay` | `recipe_id:int` | 按配方零模型重放 |
-| `memory` | `action`；`value?`；`--kind`；`--limit=20` | `list / add / search / forget / stats`；`--kind` 见第 9 节四类 |
+| `memory` | `action`；`value?`；`--kind`；`--limit=20`；`--days=30` | `list / add / search / forget / stats / decay`；`decay` 按半衰期衰减非偏好记忆，`--days` 指定半衰期；`--kind` 见第 9 节四类 |
 | `schedule` | `action`；`args*`；`--name` | `add / list / remove / enable / disable / run`；cron 5 段 |
 | `knowledge` | `action`；`value?`；`--title`；`--text`；`--domain`；`--limit=4` | `list / add / search / remove / stats / domains`；`domains` 输出七域文档数 |
 | `state` | `[show\|set]`；`key?`；`value?` | 查看 / 修改第一层会话状态（工作记忆），字段见 9.1 |
 | `longterm` | `kind`；`[add\|list]`；`--date` 及各字段选项 | `lesson / observation / deviation` 三表增查，`stats` 输出计数 |
-| `audit` | `[verify\|sessions]`；`session?` | 重算哈希链校验审计；`sessions` 列出有审计的会话 |
-| `parallel` | `task`；`--subtasks a,b,c` | 并行协同；省略子任务则先由模型拆解 |
+| `audit` | `[verify\|sessions\|export]`；`session?`；`--out` | `verify` 重算哈希链；`sessions` 列出有审计的会话；`export` 校验通过后导出副本（默认 `runs/<session>/audit.export.jsonl`），链损坏拒绝导出 |
+| `parallel` | `task`；`--subtasks a,b,c`；`--review` | 并行协同；省略子任务则先由模型拆解；`--review` 追加审阅者角色，合并结果并指出冲突 |
 | `serve` | `--port` | 启动本地控制台（uvicorn） |
 | `daemon` | `action`；`--port` | `start / stop / status`，子进程崩溃按退避重启 |
 
@@ -110,7 +112,9 @@
 | POST | `/api/sessions/{session_id}/resume` | 后台恢复会话 |
 | POST | `/api/sessions/{session_id}/cancel` | 请求取消指定会话 |
 | POST | `/api/run` | 后台执行任务（`task`） |
-| POST | `/api/parallel` | 后台并行执行（`task`，可选 `subtasks`） |
+| POST | `/api/parallel` | 后台并行执行（`task`，可选 `subtasks`、`review`） |
+| GET | `/api/metrics` | span 汇总；`?session=<id>` 只看单会话，省略为全局 |
+| GET | `/api/sessions/{session_id}/trace` | 该会话的 span 明细（名称、类型、耗时、结果、属性） |
 | GET | `/api/events` | SSE 事件流（见第 6 节） |
 | GET | `/api/schedules` | 定时任务列表 |
 | POST | `/api/schedules` | 新增定时任务（`name`、`cron`、`task`） |
@@ -123,6 +127,8 @@
 
 调度器：`_run_scheduler` 每轮扫描到期任务，为每个任务建独立 `asyncio.Task` 并发派发（`asyncio.Semaphore(3)` 限流）；`inflight` 集合去重，同一任务未结束不会被重复触发；执行结束才 `mark_ran`，服务关闭时取消所有未完成子任务。单个任务异常不影响调度循环。
 
+限流：`CapabilityRegistry` 可挂 `RateLimiter`（滑动 60 秒窗口，键为通道名，`default` 兜底）；超限调用直接返回 `rate limited: <source> 超过 N 次/分钟`，不触达底层通道。限额来自 `tool_rate_limits`。
+
 ---
 
 ## 6. SSE 事件类型（`/api/events`）
@@ -133,6 +139,7 @@
 | `tool_start` | `tool` | 工具调用前 |
 | `tool_end` | `tool`、`ok`、`error` | 工具返回后 |
 | `subtasks` | `task`、`subtasks`、`count` | 并行拆解结果 |
+| `review` | `task`、`verdict`、`conflicts` | 审阅者给出合并结论（`--review` / `review=true`） |
 | `finish` | `session`、`answer`、可选 `subtasks` | 任务收尾 |
 | `schedule_start` | `id`、`name` | 定时任务派发 |
 
@@ -167,7 +174,7 @@
 
 ---
 
-## 9. 持久化存储（SQLite，13 张表）
+## 9. 持久化存储（SQLite，15 张表）
 
 | 表 | 所属模块 | 用途 |
 | --- | --- | --- |
@@ -184,8 +191,10 @@
 | `chunks` | `core/knowledge.py` | 文档分块（默认目标 500 字/块） |
 | `recipes` | `core/recipe.py` | 成功工具序列，可零模型重放 |
 | `schedules` | `core/scheduler.py` | cron 定时任务：表达式、任务、启用态、上次/下次运行 |
+| `tool_runs` | `core/journal.py` | 工具执行日志：会话、步号、工具、参数 sha1、状态、尝试次数、耗时、结果预览 |
+| `spans` | `core/telemetry.py` | span 追踪：模型调用 / 工具调用的耗时、成败与属性，用于 `metrics` 聚合 |
 
-审计为追加式哈希链 JSONL：`<runs_dir>/<session_id>/audit.jsonl`；写入前对 `token` / `password` / `secret` / `cookie` / `api_key` / `private_key` 及 `*_token`、`*_secret` 等字段递归脱敏为 `***`（`max_tokens` 等非凭据字段不误伤）。`audit verify` 重算整链，被篡改返回退出码 1。
+审计为追加式哈希链 JSONL：`<runs_dir>/<session_id>/audit.jsonl`；写入前对 `token` / `password` / `secret` / `cookie` / `api_key` / `private_key` 及 `*_token`、`*_secret` 等字段递归脱敏为 `***`（`max_tokens` 等非凭据字段不误伤）。`audit verify` 重算整链，被篡改返回退出码 1；`audit export` 先校验再复制，链损坏拒绝导出。
 
 ### 9.1 三层记忆体系
 
@@ -198,6 +207,8 @@
 - 工作记忆字段（16 项）：知识库、远程调用、我的名字、用户称呼、记忆点、上次会话日期、新点主题、离线时间线、工作流节点、初始化阶段、待回顾、暂停状态、写入锁、会话计数、时间戳、焦点线。
 - 写入锁：`locked()` 上下文置 `locked`，期间其它 `update()` 抛 `RuntimeError`，退出自动解锁；未知字段抛 `ValueError`。
 - 会话计数每次 `begin_session()` +1；`end_session(status, summary)` 写工作流节点、初始化阶段、待回顾（completed 时取回答摘要）或暂停状态（cancelled / paused）。
+- 记忆闭环：`_system_prompt_for()` 记录本次注入的记忆 id；任务结束按成败回写 `feedback()`（成功 +0.2，失败 -0.15，夹在 `[0.1, 5.0]`）；`decay()` 按未使用时长做半衰期衰减，偏好不衰减。
+- 知识闭环：`route_domain(query)` 按关键词把查询路由到七域之一，`knowledge.search(domain="auto")` 自动收窄检索范围；判断不出时退回全库，不强行归类。
 
 ---
 
@@ -225,15 +236,17 @@
 
 配置文件（`agent.yaml`，模板 `agent.example.yaml`）字段：
 
-`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
+`workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`scheduler_enabled`、`scheduler_interval`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`tool_retries`、`tool_rate_limits`、`port`、`auth_token`、`model`、`bridge`、`embedding`（`enabled` / `capability`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
 - `max_calls` / `max_tokens`：单次运行的模型调用数与 token 预算，`0` 表示不限；超限时任务以 `incomplete` 收尾并直接说明预算耗尽。
 - `repair_rounds`：工具失败后允许模型修正参数重试的轮数，`0` 表示不修正。
+- `tool_retries`：同一幂等工具遇到瞬时错误（超时 / 连接失败 / 不可达）时的重试次数，`0` 表示不重试；指数退避上限 2 秒。
+- `tool_rate_limits`：按通道的每分钟调用上限，形如 `{"browser": 30, "default": 120}`；未配置的通道不限流。
 - `mcp_servers` 会与 `<db_path 所在目录>/mcp.local.yaml`（`mcp add/remove` 写入）合并，同名以 `agent.yaml` 为准。
 
 环境变量覆盖（前缀 `AGENT_*`）：
 
-`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
+`AGENT_WORKSPACE`、`AGENT_RUNS_DIR`、`AGENT_DB_PATH`、`AGENT_SKILLS_DIR`、`AGENT_PORT`、`AGENT_AUTH_TOKEN`、`AGENT_PERMISSION_MODE`、`AGENT_SCRIPT_RISK`、`AGENT_SCRIPT_MAX_CPU`、`AGENT_SCHEDULER_ENABLED`、`AGENT_SCHEDULER_INTERVAL`、`AGENT_RECORD_RECIPES`、`AGENT_PLANNING`、`AGENT_CONTEXT_LIMIT`、`AGENT_MAX_CALLS`、`AGENT_MAX_TOKENS`、`AGENT_REPAIR_ROUNDS`、`AGENT_TOOL_RETRIES`、`AGENT_BRIDGE_URL`、`AGENT_BRIDGE_TOKEN`、`AGENT_MCP_AUTO_DISCOVER`、`AGENT_EMBEDDING_CAPABILITY`；配置路径 `DOUBAO_AGENT_CONFIG`；OpenAI key 环境变量名由 `model.api_key_env` 指定（默认 `OPENAI_API_KEY`）。
 
 - `.env.local` 自动加载：`load_config()` 启动时读取当前目录与工作区的 `.env.local`，解析 `KEY=VALUE` 行（兼容剥离 `export ` 前缀，注释/空行跳过）；只补缺省变量，已存在的环境变量优先不覆盖；文件缺失或读取失败静默跳过，不引入 `python-dotenv` 依赖。
 
@@ -252,5 +265,11 @@
 - **预算与自修正**：`max_calls` / `max_tokens` 超限立即以 `incomplete` 收尾并说明耗尽原因；工具失败且 `repair_rounds > 0` 时，以同一工具、修正后的参数重试（不擅自换工具），修正也受预算与取消信号约束。
 - **技能与 MCP 运行时登记**：`skills install/uninstall` 只操作 `skills_dir` 内目录（安装拒绝同名覆盖，卸载拒绝越界路径）；`mcp add/remove` 写 `mcp.local.yaml` 而非 `agent.yaml`，下次启动合并生效。
 - **多模态入口**：`run --image`（可重复）把本地图片读为 base64 `data:` URL 塞进 OpenAI `image_url` 内容块，单张上限 5MB；模型不支持视觉时由模型侧报错，不做本地降级伪造。
+- **幂等重放**：`ToolJournal.key()` 对「工具名 + 规范化参数 JSON」取 sha1；仅 `idempotent` 且风险为 L0/L1 的工具在同会话内命中成功记录时直接回放，不再触达通道，审计记 `tool_replay`。L2/L3 不重放，避免重复产生副作用。
+- **策略化重试**：加固后只有超时 / 连接失败 / 不可达等瞬时错误才重试，权限拒绝、参数错误、未知工具立即放弃；重试次数取 `tool_retries`，指数退避上限 2 秒，响应取消信号。
 - **并行协同**：`Coordinator` 一次模型拆解为 2~5 个子任务，`Runtime.spawn_agent()` 为每个子任务建独立 Agent（共享注册表/模型/策略/记忆/配方/计量，独立取消信号与会话）；子任务异常转 `failed`，不拖垮整批。
+- **角色化协作**：执行者（`executor`）结果写入共享 `Blackboard`；`review=true` 时追加审阅者（`reviewer`）一次模型调用，输出 `{answer, conflicts, verdict}`，解析失败退回机械汇总；有冲突且原本全部成功时状态降为 `incomplete`，不假装完成。
+- **可观测**：`Telemetry` 记录模型调用与工具调用的 span（名称、类型、耗时、成败、属性）；`metrics` 输出总数、失败数、总/平均耗时、按工具计数与最慢 5 条；span 与审计分离——审计管「谁做了什么」，span 管「花了多久」。
+- **治理限流**：`tool_rate_limits` 按通道限流，超限调用在注册表层直接拒绝并回显限额，不进入底层通道；限流与权限门、预算熔断相互独立、可叠加。
+- **审计导出**：`audit export` 先 `verify` 整链，校验失败拒绝导出；成功则原样复制已脱敏 JSONL，便于离线取证。
 - **与旧体系差异**：本清单对应 `src/doubao_agent/` 新运行时；旧版 `scripts/` 子 Agent、主权 Skill CLI、宿主连接器白名单等形态在本工程代码内不存在，未登记。

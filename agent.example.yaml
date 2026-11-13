@@ -24,6 +24,8 @@ max_steps: 12
 max_calls: 0        # 单次运行模型调用预算，0=不限；接真实模型时建议设上限
 max_tokens: 0       # 单次运行 token 预算，0=不限
 repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数（0=不重试）
+tool_retries: 1     # 幂等工具遇到瞬时错误时的重试次数（0=不重试）
+tool_rate_limits: {}  # 按通道限流，如 {browser: 30, default: 120}；空=不限
 port: 8765
 auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
                                  # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可

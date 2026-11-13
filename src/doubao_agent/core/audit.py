@@ -113,6 +113,17 @@ class AuditLog:
         paths.sort(key=lambda p: (p / "audit.jsonl").stat().st_mtime, reverse=True)
         return [p.name for p in paths]
 
+    def export(self, session_id: str, out: Path | str | None = None) -> tuple[Path, int]:
+        """校验通过后导出该会话审计副本；链损坏时拒绝导出。"""
+        ok, count = self.verify(session_id)
+        if not ok:
+            raise ValueError(f"审计链校验失败，拒绝导出：{session_id}")
+        source = self._path(session_id)
+        target = Path(out) if out else self.runs_dir / session_id / "audit.export.jsonl"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes() if source.exists() else b"")
+        return target, count
+
     def verify(self, session_id: str) -> tuple[bool, int]:
         """校验哈希链：逐条重算，任何一条被改过或断链都返回 False。"""
         path = self._path(session_id)
