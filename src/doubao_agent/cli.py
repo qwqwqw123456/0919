@@ -877,9 +877,39 @@ def main(argv: list[str] | None = None) -> int:
         default="127.0.0.1",
         help="监听地址；默认仅本机。非回环地址必须配置 auth_token",
     )
-    sub.add_parser(
+    mcp_serve_parser = sub.add_parser(
         "mcp-serve",
-        help="以标准 MCP stdio server 暴露统一工具注册表（供 traecli mcp add 挂载）",
+        help="以标准 MCP server 暴露统一工具注册表（stdio 或 Streamable HTTP）",
+    )
+    mcp_serve_parser.add_argument(
+        "--transport",
+        choices=("stdio", "http"),
+        default="stdio",
+        help="stdio（默认，供 traecli mcp add 拉起）或 http（URL 直连）",
+    )
+    mcp_serve_parser.add_argument("--host", default="127.0.0.1", help="HTTP 监听地址；默认仅本机")
+    mcp_serve_parser.add_argument("--port", type=int, default=8766, help="HTTP 监听端口")
+    mcp_serve_parser.add_argument("--path", default="/mcp", help="Streamable HTTP 路径")
+    mcp_serve_parser.add_argument(
+        "--token",
+        default="",
+        help="HTTP Bearer token；也可用环境变量 DOUBAO_MCP_TOKEN。非回环监听必填",
+    )
+    mcp_serve_parser.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        help="可重复：额外的 Host 头白名单（如 192.168.1.10:*）；默认仅回环",
+    )
+    mcp_serve_parser.add_argument(
+        "--allow-origin",
+        action="append",
+        default=[],
+        help="可重复：额外的 Origin 白名单；默认拒绝带 Origin 的跨源请求",
+    )
+    mcp_serve_parser.add_argument("--stateless", action="store_true", help="HTTP 无状态模式")
+    mcp_serve_parser.add_argument(
+        "--json-response", action="store_true", help="HTTP 用 JSON 响应代替 SSE 流"
     )
 
     daemon_parser = sub.add_parser("daemon", help="常驻守护：start / stop / status")
@@ -903,8 +933,38 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config)
 
     if args.cmd == "mcp-serve":
-        from .mcp_server import serve_stdio
+        from .mcp_server import serve_http, serve_stdio
 
+        if args.transport == "http":
+            host = (args.host or "127.0.0.1").strip().lower()
+            token = (args.token or os.environ.get("DOUBAO_MCP_TOKEN", "")).strip()
+            if host not in _LOOPBACK_HOSTS and not token:
+                print(
+                    "[mcp-serve] 拒绝启动：非回环监听必须配置 --token 或 DOUBAO_MCP_TOKEN",
+                    file=sys.stderr,
+                )
+                return 2
+            if host not in _LOOPBACK_HOSTS:
+                print(f"[mcp-serve] 监听 {host}，已启用 Bearer token 鉴权", file=sys.stderr)
+                if host in ("0.0.0.0", "::"):
+                    print(
+                        "[mcp-serve] 提示：远程访问还需加 --allow-host <IP或域名>:*，"
+                        "否则 Host 校验会拒绝",
+                        file=sys.stderr,
+                    )
+            return asyncio.run(
+                serve_http(
+                    cfg,
+                    host=host,
+                    port=args.port,
+                    path=args.path,
+                    token=token,
+                    allowed_hosts=args.allow_host,
+                    allowed_origins=args.allow_origin,
+                    stateless=args.stateless,
+                    json_response=args.json_response,
+                )
+            )
         return asyncio.run(serve_stdio(cfg))
 
     if args.cmd == "daemon":

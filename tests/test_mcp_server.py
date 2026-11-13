@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import socket
+import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 import yaml
 
@@ -87,3 +91,123 @@ async def test_mcp_server_denies_gated_tool_without_approver(tmp_path):
             assert result.isError is True
             body = _text(result)
             assert "denied" in body or "未配置审批人" in body
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def test_http_transport_refuses_non_loopback_without_token(tmp_path):
+    env = _env()
+    env.pop("DOUBAO_MCP_TOKEN", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "doubao_agent.cli",
+            "--config",
+            str(_config(tmp_path)),
+            "mcp-serve",
+            "--transport",
+            "http",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(_free_port()),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    assert result.returncode == 2
+    assert "必须配置 --token" in result.stderr
+
+
+async def _wait_http(url: str, process: asyncio.subprocess.Process, timeout: float = 15.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last: Exception | None = None
+    async with httpx.AsyncClient() as client:
+        while loop.time() < deadline:
+            if process.returncode is not None:
+                stderr = (await process.stderr.read()).decode(errors="replace")
+                raise AssertionError(f"server exited early: {stderr[-2000:]}")
+            try:
+                response = await client.get(url, timeout=1.0)
+                if response.status_code == 200:
+                    return
+            except Exception as exc:  # noqa: BLE001 - retry until the listener is ready
+                last = exc
+            await asyncio.sleep(0.1)
+    raise AssertionError(f"server did not start: {last}")
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_transport_lists_and_calls_tools(tmp_path):
+    streamable_http = pytest.importorskip("mcp.client.streamable_http")
+    port = _free_port()
+    token = "test-token"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "doubao_agent.cli",
+        "--config",
+        str(_config(tmp_path)),
+        "mcp-serve",
+        "--transport",
+        "http",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--token",
+        token,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_env(),
+    )
+    try:
+        base = f"http://127.0.0.1:{port}"
+        await _wait_http(f"{base}/healthz", process)
+
+        async with httpx.AsyncClient() as client:
+            denied = await client.post(
+                f"{base}/mcp",
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            )
+            assert denied.status_code == 401
+            assert denied.headers.get("www-authenticate") == "Bearer"
+
+        async with httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {token}"}
+        ) as http_client:
+            async with streamable_http.streamable_http_client(
+                f"{base}/mcp", http_client=http_client
+            ) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    info = await session.initialize()
+                    assert info.serverInfo.name == "doubao-agent"
+
+                    listed = await session.list_tools()
+                    tools = {tool.name for tool in listed.tools}
+                    assert "system__status" in tools
+                    assert "script__run_shell" in tools
+
+                    result = await session.call_tool("system__status", {})
+                    assert result.isError is False
+                    assert "平台" in _text(result)
+    finally:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+        else:
+            stderr = (await process.stderr.read()).decode(errors="replace")
+            if process.returncode != 0:
+                print(stderr[-2000:], file=sys.stderr)
