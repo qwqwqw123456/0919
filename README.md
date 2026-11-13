@@ -40,7 +40,7 @@ git clone <仓库地址> && cd doubao-agent
 | --- | --- |
 | `model` | `provider: openai` + `base_url`（带版本段）+ `model` + `api_key_env`；`mock` 仅用于离线联通测试 |
 | `permission_mode` | `auto` / `guarded` / `manual`；配合 `auto_approve` 规则可无人值守 |
-| `max_calls` / `max_tokens` | 单次运行的模型预算，0 表示不限；接真实模型建议设上限 |
+| `max_calls` / `max_tokens` | 模型调用数与 token 预算，0 表示不限；当前计量进程级累计、跨 run 不复位（待修，见 REVIEW.md P0-6）；接真实模型建议设上限 |
 | `repair_rounds` | 规划步骤工具失败时，让模型修正参数的轮数 |
 | `tool_retries` | 幂等工具遇到瞬时错误（超时/连接/不可达）的重试次数 |
 | `tool_rate_limits` | 按通道的每分钟调用上限，如 `{browser: 30, default: 120}` |

@@ -225,7 +225,7 @@ src/doubao_agent/
 
 ## 12. 并行协同
 
-- **拆解**：`Coordinator.decompose` 一次模型调用把复杂任务拆成 2~5 个互不依赖的子任务，容错解析（兼容 markdown 代码块 / 裸数组 / `{subtasks:[…]}`）；拆解失败则整体作为单任务兜底。
+- **拆解**：`Coordinator.decompose` 一次模型调用把复杂任务拆成 2~5 个互不依赖的子任务，容错解析（兼容 markdown 代码块 / 裸数组 / `{subtasks:[…]}`）；设计上拆解失败整体作为单任务兜底，当前实现未加 try/except，异常会直接向上传播（待修见 REVIEW.md P1-5）。
 - **并发执行**：`Runtime.spawn_agent()` 为每个子任务创建独立 Agent 实例——**共享**工具注册表、模型、权限策略、审计、记忆、配方与成本计量，**独立**取消信号与会话，`asyncio.gather` 真并发。
 - **人机接管**：拆解结果先经 `subtasks` 事件流式可见；`confirm` 回调可让用户在拆解后、执行前增删改子任务；高危操作仍由权限门 `approver` 逐条确认。
 - **汇总**：子任务结果按状态拼装成结构化汇总，`completed/total` 计数，失败子任务不拖垮整体。

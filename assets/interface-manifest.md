@@ -250,9 +250,9 @@
 
 `workspace`、`runs_dir`、`db_path`、`permission_mode`、`script_risk`、`script_max_cpu`、`record_recipes`、`planning.enabled`、`skills_dir`、`context_limit`、`context_model_summary`、`scheduler_enabled`、`scheduler_interval`、`watch_enabled`、`watch_dirs`、`watch_interval`、`watch_task`、`watch_suffixes`、`max_steps`、`max_calls`、`max_tokens`、`repair_rounds`、`provider_retries`、`provider_fallback`、`tool_cache_enabled`、`tool_cache_ttl`、`tool_channel_concurrency`、`tool_retries`、`tool_rate_limits`、`port`、`auth_token`、`model`、`model_fallback`、`bridge`、`embedding`（`enabled` / `capability`）、`evolution`（`enabled` / `stale_days` / `archive_days`）、`auto_approve`、`mcp_servers`、`mcp_auto_discover`、`api_sources`。
 
-- `max_calls` / `max_tokens`：单次运行的模型调用数与 token 预算，`0` 表示不限；超限时任务以 `incomplete` 收尾并直接说明预算耗尽。
+- `max_calls` / `max_tokens`：模型调用数与 token 预算，`0` 表示不限；当前 UsageMeter 进程级累计、跨 run 不复位（非单次运行预算，待修见 REVIEW.md P0-6）；超限时任务以 `incomplete` 收尾并直接说明预算耗尽。
 - `repair_rounds`：工具失败后允许模型修正参数重试的轮数，`0` 表示不修正。
-- `provider_retries`：模型端点异常重试次数；401/403/404 不重试，直接进降级判断；`provider_fallback` 为 `"mock"` 时主端点失败切内置 mock 兜底；配置 `model_fallback` 块（结构同 `model`）时装配备用真实 provider；切换后结果标注 `degraded`，两者皆留空则不降级、异常上抛。
+- `provider_retries`：模型端点异常重试次数；设计上 401/403/404 不重试，但当前状态码提取未覆盖 `httpx.HTTPStatusError.response.status_code`，401/403 会被误判为可重试（待修见 REVIEW.md P0-5）；`provider_fallback` 为 `"mock"` 时主端点失败切内置 mock 兜底；配置 `model_fallback` 块（结构同 `model`）时装配备用真实 provider（备用配置当前未透传到 `spawn_agent` 主路径，待修见 REVIEW.md P0-3）；降级标注尚未透出到最终结果（待修见 REVIEW.md P0-4），两者皆留空则不降级、异常上抛。
 - `tool_cache_enabled` / `tool_cache_ttl`：幂等且只读（L0）工具的结果进程内缓存开关与存活秒数；写工具、非幂等工具不缓存；配方 replay 强制绕过缓存真实重放。
 - `tool_channel_concurrency`：单通道工具并发上限（默认 3），registry 按通道信号量排队；`0` 表示不限制。
 - `context_model_summary`：上下文压缩时是否调模型浓缩被裁早期消息（默认关）；开启后额外产生模型调用，摘要失败回落规则要点。
