@@ -2,7 +2,7 @@
 
 > 审查对象：`qwqwqw123456/0919` 仓库，分支 `feat/evolution-layer`，commit `7f0972b`，工作区 clean。
 > 审查方法：`src/doubao_agent/` 源码逐文件实读 + 关键缺陷本机实测复现 + 全量回归 `pytest -q`。
-> 基线实测：`src/doubao_agent` 47 个 Python 文件 / 8208 行；`tests` 29 个 `test_*.py`（含 `conftest.py` 共 30 个）/ 3458 行；`eval` 1 个 / 132 行；`skills` 2 个 / 135 行；全仓 80 个 Python 文件 / 11933 行；SQLite 16 张业务表（10 个 Store）；**171 passed**（3 个第三方/配置类弃用告警）；版本 0.2.0。
+> 基线实测：`src/doubao_agent` 48 个 Python 文件 / 8307 行；`tests` 30 个 `test_*.py`（含 `conftest.py` 共 31 个）/ 3461 行；`eval` 1 个 / 132 行；`skills` 4 个技能目录 / 7 个文件 / 339 行；全仓 80 个 Python 文件 / 11950 行；SQLite 16 张业务表（10 个 Store）；**175 passed**（3 个第三方/配置类弃用告警）；版本 0.2.0。
 
 ## 一、总体结论
 
@@ -15,7 +15,7 @@
 - **统一注册表**：MCP / HTTP API / 浏览器 / 桌面 / 脚本 / 技能 / 知识 / 系统走同一 `ToolSpec` 协议，source 接口清晰，新增通道成本低。
 - **记忆分层完整**：短期工作记忆 / 长期教训观察 / 知识库 / 配方回放四层；审计追加式哈希链；事件总线；span 级遥测。
 - **权限按可逆性分级** + 预授权规则；工具输出用不可信头脚包裹；检查点续跑；配方零模型回放；并行协同 + 可选审阅。
-- 离线评估集进入 pytest 闸门，171 项回归全绿。
+- 离线评估集进入 pytest 闸门，175 项回归全绿。
 
 ## 三、P0：先止血（安全与确定性缺陷）
 
@@ -173,5 +173,5 @@
 ### 双向打通的最小路径
 
 1. **前置阻塞**：需先有一个已加入企业组织、套餐含 CLI 权限的账号（旗舰版可生成 `trae-lt-` 令牌，或由管理员加入后走 SSO）；登录态建立后，再在当前出口网络下验证一次无头 `traecli exec --json` 能跑通真实任务。普通个人账号不满足此前置条件。
-2. 方向 A（Trae 调我方工具）：在我方补一个标准 MCP server 适配层，把注册表 `ToolSpec` 暴露成 MCP tools，再由 `traecli mcp add` 挂入。
+2. **方向 A（Trae 调我方工具）·已落地骨架（2026-11-13）**：新增 `src/doubao_agent/mcp_server.py` 与 CLI 子命令 `mcp-serve`（stdio），把注册表 `ToolSpec` 暴露成标准 MCP tools；`--expose read`（默认）仅对外暴露 L0 只读，`all` 放开全部风险等级（仅限本机受控场景）。实测：stdio 子进程 initialize 握手成功（serverInfo `doubao-agent 0.2.0`），`tools/list` 返回 L0 工具，`tools/call system.status` 真实返回只读指标；本地 L1/L3 默认不暴露。外部 client 挂载形态：`traecli mcp add <name> --command <python> --args -m doubao_agent.cli mcp-serve`。**已知边界**：过滤依据是 `ToolSpec.risk`；宿主 MCP manifest 把 `sandbox_execute_bash` / `browser_gui_execute_action` 名义标为 L0，但含执行能力，对外暴露前需人工复核其风险标注（既有标注偏差，本轮未改判定）。
 3. 方向 B（我方调 Trae）：在我方补 exec-server JSON-RPC 客户端（或 ACP 客户端），按导出的 schema 走 initialize → 会话创建 → 任务下发 → 通知接收；这对应 G9「A2A 跨进程协议」缺口。

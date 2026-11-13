@@ -17,6 +17,7 @@ from .core.audit import AuditLog
 from .core.evolution import EvolutionStore
 from .core.recipe import RecipeStore
 from .core.memory import KINDS as MEMORY_KINDS
+from .mcp_server import serve
 from .runtime import Runtime
 from .types import ToolCall, ToolSpec
 
@@ -708,6 +709,13 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "mcp":
             return _mcp_command(runtime, args)
 
+        if args.cmd == "mcp-serve":
+            expose = args.expose or os.environ.get("AGENT_MCP_SERVER_EXPOSE", "read")
+            if expose not in ("read", "all"):
+                expose = "read"
+            await serve(runtime.registry, expose=expose)
+            return 0
+
         if args.cmd == "metrics":
             session = getattr(args, "session", None)
             if getattr(args, "detail", False):
@@ -771,6 +779,15 @@ def main(argv: list[str] | None = None) -> int:
     mcp_parser.add_argument("--transport", default=None, help="http | sse，默认 http")
     mcp_parser.add_argument("--command", default=None, help="stdio 启动命令")
     mcp_parser.add_argument("--args", nargs="*", default=None, help="stdio 命令参数")
+    mcp_serve_parser = sub.add_parser(
+        "mcp-serve", help="把注册表工具暴露为标准 MCP server（stdio，默认仅 L0 只读）"
+    )
+    mcp_serve_parser.add_argument(
+        "--expose",
+        choices=["read", "all"],
+        default=None,
+        help="read 仅暴露 L0 只读（默认）；all 放开全部风险等级，仅限本机受控场景",
+    )
     metrics_parser = sub.add_parser("metrics", help="可观测指标：span 汇总 / 慢调用 / 失败数")
     metrics_parser.add_argument("--session", default=None, help="只看指定会话")
     metrics_parser.add_argument("--detail", action="store_true", help="按时间顺序列出该会话全部 span")

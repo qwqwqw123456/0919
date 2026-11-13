@@ -77,7 +77,7 @@ class Runtime:
                 mcp_servers.append(
                     MCPServerConfig(name="host", transport="http", url=DEFAULT_HOST_MCP_URL)
                 )
-                print(f"[info] 已自动接入宿主 MCP：{DEFAULT_HOST_MCP_URL}")
+                print(f"[info] 已自动接入宿主 MCP：{DEFAULT_HOST_MCP_URL}", file=sys.stderr)
             else:
                 print(
                     f"[info] 宿主 MCP {DEFAULT_HOST_MCP_URL} 暂不可达，跳过（相关能力暂缺）",
