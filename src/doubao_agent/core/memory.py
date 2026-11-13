@@ -200,6 +200,42 @@ class MemoryStore:
         self._reinforce([int(row["id"]) for row in picked])
         return [self._row_to_dict(row) for row in picked]
 
+    def feedback(self, ids: list[int], ok: bool, delta: float = 0.2) -> int:
+        """回写命中效果：任务成功给命中记忆加分，失败降权，权重夹在 [0.1, 5.0]。"""
+        if not ids:
+            return 0
+        step = delta if ok else -delta * 0.75
+        with self._lock:
+            self._conn.executemany(
+                "UPDATE facts SET weight = MAX(0.1, MIN(5.0, weight + ?)) WHERE id = ?",
+                [(step, memory_id) for memory_id in ids],
+            )
+            self._conn.commit()
+        return len(ids)
+
+    def decay(
+        self,
+        half_life_days: float = 30.0,
+        floor: float = 0.1,
+        now: float | None = None,
+    ) -> int:
+        """按未使用时长做半衰期衰减；偏好不衰减（用户显式要求应长期优先）。"""
+        now = time.time() if now is None else now
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, weight, used_at FROM facts WHERE kind != 'preference'"
+            ).fetchall()
+            updates: list[tuple[float, int]] = []
+            for row in rows:
+                age_days = max(0.0, (now - float(row["used_at"])) / 86400)
+                decayed = float(row["weight"]) * (0.5 ** (age_days / half_life_days))
+                target = max(floor, round(decayed, 4))
+                if abs(target - float(row["weight"])) >= 1e-4:
+                    updates.append((target, int(row["id"])))
+            self._conn.executemany("UPDATE facts SET weight = ? WHERE id = ?", updates)
+            self._conn.commit()
+        return len(updates)
+
     def _reinforce(self, ids: list[int]) -> None:
         if not ids:
             return

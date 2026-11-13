@@ -104,6 +104,8 @@ class Config:
     max_calls: int = 0                 # 单次运行模型调用预算，0 表示不限
     max_tokens: int = 0                # 单次运行 token 预算，0 表示不限
     repair_rounds: int = 1             # 规划执行失败时允许模型修正参数的轮数
+    tool_retries: int = 1              # 工具失败后按策略重试的次数（仅幂等工具）
+    tool_rate_limits: dict[str, int] = field(default_factory=dict)  # 按来源的每分钟调用上限
     port: int = DEFAULT_PORT
     auth_token: str = ""               # 控制台 /api 鉴权令牌；为空表示不鉴权（仅限本机）
     model: dict[str, Any] = field(default_factory=dict)
@@ -213,6 +215,12 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.max_calls = max(0, int(data.get("max_calls", cfg.max_calls)))
         cfg.max_tokens = max(0, int(data.get("max_tokens", cfg.max_tokens)))
         cfg.repair_rounds = max(0, int(data.get("repair_rounds", cfg.repair_rounds)))
+        cfg.tool_retries = max(0, int(data.get("tool_retries", cfg.tool_retries)))
+        limits = data.get("tool_rate_limits")
+        if isinstance(limits, dict):
+            cfg.tool_rate_limits = {
+                str(key): max(0, int(value)) for key, value in limits.items()
+            }
         cfg.port = int(data.get("port", cfg.port))
         cfg.auth_token = str(data.get("auth_token", cfg.auth_token) or "")
         cfg.model = dict(data.get("model") or _default_model())
@@ -279,6 +287,8 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.max_tokens = max(0, int(os.environ["AGENT_MAX_TOKENS"]))
     if os.environ.get("AGENT_REPAIR_ROUNDS"):
         cfg.repair_rounds = max(0, int(os.environ["AGENT_REPAIR_ROUNDS"]))
+    if os.environ.get("AGENT_TOOL_RETRIES"):
+        cfg.tool_retries = max(0, int(os.environ["AGENT_TOOL_RETRIES"]))
     cfg.db_path = Path(os.environ.get("AGENT_DB_PATH", cfg.db_path))
     cfg.runs_dir = Path(os.environ.get("AGENT_RUNS_DIR", cfg.runs_dir))
     if not cfg.model:

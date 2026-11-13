@@ -25,6 +25,10 @@ class KnowledgeSource:
                     "properties": {
                         "query": {"type": "string", "description": "检索问题或关键词"},
                         "limit": {"type": "integer", "description": "返回片段数，默认 4"},
+                        "domain": {
+                            "type": "string",
+                            "description": "知识域编号 01-07；填 auto 自动路由，留空全库检索",
+                        },
                     },
                     "required": ["query"],
                 },
@@ -61,7 +65,8 @@ class KnowledgeSource:
             if not query:
                 return ToolResult(call_id=call.call_id, ok=False, error="query is required")
             limit = int(args.get("limit") or 4)
-            hits = await self.store.asearch(query, limit=limit)
+            domain = str(args.get("domain") or "").strip() or None
+            hits = await self.store.asearch(query, limit=limit, domain=domain)
             if not hits:
                 return ToolResult(call_id=call.call_id, ok=True, content="（知识库中没有找到相关内容）")
             lines = []

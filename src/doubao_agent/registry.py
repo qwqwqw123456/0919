@@ -5,6 +5,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from .core.limits import RateLimiter
 from .sources.base import CapabilitySource
 from .types import Risk, ToolCall, ToolResult, ToolSpec
 from .utils import dumps
@@ -18,6 +19,7 @@ class CapabilityRegistry:
         cache_ttl: float = 60.0,
         cache_max: int = 128,
         channel_concurrency: int = 3,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self._sources: dict[str, CapabilitySource] = {}
         self._specs: dict[str, ToolSpec] = {}
@@ -30,6 +32,7 @@ class CapabilityRegistry:
         # 按通道并发上限；<=0 表示不限制。
         self._channel_concurrency = max(0, channel_concurrency)
         self._channel_semaphores: dict[str, asyncio.Semaphore] = {}
+        self.rate_limiter = rate_limiter
 
     def add_source(self, source: CapabilitySource) -> None:
         self._sources[source.name] = source
@@ -82,6 +85,15 @@ class CapabilityRegistry:
         if key is None:
             return ToolResult(call_id=call.call_id, ok=False, error=f"unknown tool: {call.name}")
         source, original = self._dispatch[key]
+        if self.rate_limiter is not None and not self.rate_limiter.allow(source.name):
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                error=(
+                    f"rate limited: {source.name} 超过 "
+                    f"{self.rate_limiter.limit_for(source.name)} 次/分钟"
+                ),
+            )
         spec = self._specs[key]
         cache_key = self._cache_key(key, call.arguments) if self._cacheable(spec) else None
         if cache_key is not None and use_cache:

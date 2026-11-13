@@ -17,6 +17,54 @@ _DECOMPOSE_PROMPT = """把下面的任务拆分成 2~5 个可以并行执行、�
 
 任务：{task}"""
 
+_REVIEW_PROMPT = """你是审阅者（reviewer）。下面是原任务与多个执行者（executor）的结果。
+请判断：结果是否完成任务、彼此是否冲突，并给出可直接交付的最终答复。
+只输出 JSON，不要解释：
+{{"answer": "最终答复", "conflicts": ["冲突点"], "verdict": "ok" 或 "needs_attention"}}
+
+原任务：{task}
+
+执行结果：
+{results}"""
+
+
+class Blackboard:
+    """共享黑板：协作过程中各角色读写同一份状态（拆解、结果、审阅结论）。"""
+
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def snapshot(self) -> dict[str, Any]:
+        return dict(self._data)
+
+
+def _parse_review(text: str) -> dict[str, Any] | None:
+    """容错解析审阅 JSON；解析不出 answer 就返回 None，由调用方退回机械汇总。"""
+    raw = (text or "").strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)```", raw, re.DOTALL)
+    if fence:
+        raw = fence.group(1).strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    answer = str(data.get("answer") or "").strip()
+    if not answer:
+        return None
+    conflicts = [
+        str(item).strip() for item in (data.get("conflicts") or []) if str(item).strip()
+    ]
+    verdict = str(data.get("verdict") or ("ok" if not conflicts else "needs_attention"))
+    return {"answer": answer, "conflicts": conflicts, "verdict": verdict}
+
 
 def _parse_string_list(text: str) -> list[str]:
     """从模型输出中容错解析字符串数组（兼容 markdown 代码块与裸 JSON）。"""
@@ -74,6 +122,7 @@ class Coordinator:
         subtasks: list[str] | None = None,
         on_event: Callable[[dict[str, Any]], Any] | None = None,
         confirm: Callable[[list[str]], Any] | None = None,
+        review: bool = False,
     ) -> dict[str, Any]:
         if not subtasks:
             subtasks = await self.decompose(task)
@@ -85,6 +134,9 @@ class Coordinator:
             if isinstance(outcome, list):
                 subtasks = [str(s) for s in outcome if str(s).strip()]
 
+        board = Blackboard()
+        board.set("task", task)
+        board.set("subtasks", list(subtasks))
         await self._emit(
             on_event, {"type": "subtasks", "task": task, "subtasks": subtasks, "count": len(subtasks)}
         )
@@ -94,6 +146,7 @@ class Coordinator:
             result = await agent.run(subtask, on_event=on_event)
             return {
                 "task": subtask,
+                "role": "executor",
                 "status": result.get("status", "unknown"),
                 "answer": result.get("answer", ""),
                 "session_id": result.get("session_id"),
@@ -116,9 +169,29 @@ class Coordinator:
             else:
                 results.append(item)
 
+        board.set("results", results)
         ok_count = sum(1 for item in results if item["status"] == "completed")
         status = "completed" if ok_count == len(results) else ("incomplete" if ok_count else "failed")
         answer = self._summarize(task, results, ok_count)
+
+        verdict: dict[str, Any] | None = None
+        if review:
+            verdict = await self._review(task, results)
+            if verdict is not None:
+                board.set("review", verdict)
+                answer = verdict["answer"]
+                if verdict["verdict"] != "ok" and status == "completed":
+                    status = "incomplete"
+                await self._emit(
+                    on_event,
+                    {
+                        "type": "review",
+                        "task": task,
+                        "verdict": verdict["verdict"],
+                        "conflicts": verdict["conflicts"],
+                    },
+                )
+
         await self._emit(
             on_event, {"type": "finish", "task": task, "answer": answer, "subtasks": results}
         )
@@ -128,7 +201,26 @@ class Coordinator:
             "subtasks": results,
             "completed": ok_count,
             "total": len(results),
+            "review": verdict,
+            "blackboard": board.snapshot(),
         }
+
+    async def _review(self, task: str, results: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """审阅者角色：合并执行者结果、指出冲突并给出最终答复。失败时返回 None。"""
+        brief = [
+            {"task": item["task"], "status": item["status"], "answer": item["answer"][:1200]}
+            for item in results
+        ]
+        prompt = _REVIEW_PROMPT.format(
+            task=task, results=json.dumps(brief, ensure_ascii=False, indent=2)
+        )
+        try:
+            reply = await self.provider.complete(
+                [{"role": "user", "content": prompt}], []
+            )
+        except Exception:  # noqa: BLE001 - 审阅失败不应抹掉已有结果
+            return None
+        return _parse_review(reply.get("content") or "")
 
     @staticmethod
     def _summarize(task: str, results: list[dict[str, Any]], ok_count: int) -> str:

@@ -9,8 +9,10 @@ from .config import Config, MCPServerConfig
 from .core.agent import Agent
 from .core.audit import AuditLog
 from .core.coordinator import Coordinator
+from .core.journal import ToolJournal
 from .core.knowledge import KnowledgeStore
 from .core.evolution import EvolutionStore
+from .core.limits import RateLimiter
 from .core.longterm import LongTermMemory
 from .core.memory import MemoryStore
 from .core.permissions import Approver, PermissionPolicy
@@ -18,6 +20,7 @@ from .core.planner import Planner
 from .core.recipe import RecipeStore
 from .core.scheduler import ScheduleStore
 from .core.session import SessionStore
+from .core.telemetry import Telemetry
 from .core.usage import UsageMeter
 from .core.working import WorkingMemory
 from .providers import ModelProvider, build_provider
@@ -53,6 +56,8 @@ class Runtime:
     skills: SkillManager
     usage: UsageMeter
     scheduler: ScheduleStore
+    journal: ToolJournal
+    telemetry: Telemetry
     evolution: EvolutionStore | None = None
     # 正在运行的会话 → 该次运行专属的 Agent（取消只作用于对应会话）
     _runs: dict[str, Agent] = field(default_factory=dict, repr=False, compare=False)
@@ -63,6 +68,7 @@ class Runtime:
         registry = CapabilityRegistry(
             cache_ttl=cache_ttl,
             channel_concurrency=config.tool_channel_concurrency,
+            rate_limiter=RateLimiter(config.tool_rate_limits),
         )
 
         mcp_servers = list(config.mcp_servers)
@@ -164,6 +170,8 @@ class Runtime:
         elif config.model_fallback:
             fallback = build_provider(config.model_fallback, bridge)
         usage = UsageMeter(max_calls=config.max_calls, max_tokens=config.max_tokens)
+        journal = ToolJournal(config.db_path)
+        telemetry = Telemetry(config.db_path)
         agent = Agent(
             registry=registry,
             provider=provider,
@@ -183,6 +191,9 @@ class Runtime:
             fallback_provider=fallback,
             provider_retries=config.provider_retries,
             model_summary=config.context_model_summary,
+            journal=journal,
+            telemetry=telemetry,
+            tool_retries=config.tool_retries,
         )
         return cls(
             config=config,
@@ -198,6 +209,8 @@ class Runtime:
             skills=skills,
             usage=usage,
             scheduler=scheduler,
+            journal=journal,
+            telemetry=telemetry,
             evolution=evolution,
         )
 
@@ -211,6 +224,8 @@ class Runtime:
         self.knowledge.close()
         self.recipes.close()
         self.scheduler.close()
+        self.journal.close()
+        self.telemetry.close()
 
     async def reload_skills(self) -> int:
         """重新扫描技能目录并热更新工具注册表（新增/删除技能无需重启）。"""
@@ -242,6 +257,9 @@ class Runtime:
             cancel_event=asyncio.Event(),
             working=self.working,
             repair_rounds=self.config.repair_rounds,
+            journal=self.journal,
+            telemetry=self.telemetry,
+            tool_retries=self.config.tool_retries,
         )
 
     def running_sessions(self) -> list[str]:

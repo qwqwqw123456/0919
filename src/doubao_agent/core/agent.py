@@ -6,18 +6,21 @@ import inspect
 import json
 import mimetypes
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from ..providers import ModelProvider
 from ..registry import CapabilityRegistry
-from ..types import ToolCall, ToolResult
+from ..types import Risk, ToolCall, ToolResult
 from .audit import AuditLog
+from .journal import ToolJournal
 from .memory import MemoryStore
 from .permissions import PermissionPolicy
 from .planner import Plan, Planner
 from .recipe import RecipeStore
 from .session import SessionStore
+from .telemetry import Telemetry
 from .usage import UsageMeter
 from .working import WorkingMemory
 
@@ -201,6 +204,18 @@ def _retryable(exc: Exception) -> bool:
     return status in _RETRYABLE_STATUS
 
 
+# 工具层只有「重试可能成功」的瞬时错误才退避重试；权限拒绝、参数错误、未知工具直接放弃。
+_TOOL_RETRY_MARKERS = (
+    "timeout", "timed out", "connection", "temporar", "unavailable",
+    "不可达", "超时", "连接",
+)
+
+
+def _tool_retryable_error(error: str | None) -> bool:
+    text = (error or "").lower()
+    return bool(text) and any(marker in text for marker in _TOOL_RETRY_MARKERS)
+
+
 def build_user_content(task: str, images: list[str] | None) -> Any:
     """把图片编码为 OpenAI 多模态消息内容；无图片时仍返回纯文本。"""
     if not images:
@@ -239,6 +254,9 @@ class Agent:
         provider_retries: int = 1,
         retry_delay: float = 0.2,
         model_summary: bool = False,
+        journal: ToolJournal | None = None,
+        telemetry: Telemetry | None = None,
+        tool_retries: int = 1,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -261,6 +279,11 @@ class Agent:
         self.retry_delay = max(0.0, retry_delay)
         self.model_summary = model_summary
         self.last_degraded: str | None = None
+        self.journal = journal
+        self.telemetry = telemetry
+        self.tool_retries = max(0, int(tool_retries))
+        self._recalled_ids: list[int] = []
+        self._allow_replay = False
         # 会话级产物清单：只扫本会话目录，按路径去重，不做 mtime 缓存（避免同一时间片内漏扫）。
         self._artifact_seen: dict[str, set[str]] = {}
 
@@ -269,41 +292,60 @@ class Agent:
         self.cancel_event.set()
 
     async def _complete(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        session_id: str = "",
     ) -> dict[str, Any]:
-        model_note: str | None = None
-        if self.model_summary and type(self.provider).__name__ != "MockProvider":
-            _, _, dropped = _split(messages, self.context_limit)
-            model_note = await _summarize_dropped(self.provider, dropped)
-        trimmed, digest = _compact(messages, self.context_limit, model_note=model_note)
-        _persist_digest(self.memory, digest)
-        last_error: Exception | None = None
-        attempts = self.provider_retries + 1
-        for attempt in range(attempts):
-            try:
-                reply = await self.provider.complete(trimmed, tools)
+        started = time.perf_counter()
+        ok = True
+        try:
+            model_note: str | None = None
+            if self.model_summary and type(self.provider).__name__ != "MockProvider":
+                _, _, dropped = _split(messages, self.context_limit)
+                model_note = await _summarize_dropped(self.provider, dropped)
+            trimmed, digest = _compact(messages, self.context_limit, model_note=model_note)
+            _persist_digest(self.memory, digest)
+            last_error: Exception | None = None
+            attempts = self.provider_retries + 1
+            for attempt in range(attempts):
+                try:
+                    reply = await self.provider.complete(trimmed, tools)
+                    self.usage.record(reply.get("usage"))
+                    self.last_degraded = None
+                    return reply
+                except Exception as exc:  # noqa: BLE001 - 端点异常在这里统一收敛
+                    last_error = exc
+                    if attempt + 1 >= attempts or not _retryable(exc):
+                        break
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+            if self.fallback_provider is not None:
+                try:
+                    reply = await self.fallback_provider.complete(trimmed, tools)
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(
+                        f"主备模型均不可用：{_describe(last_error)} / {_describe(exc)}"
+                    ) from exc
                 self.usage.record(reply.get("usage"))
-                self.last_degraded = None
+                reason = _describe(last_error)
+                reply["degraded"] = reason
+                reply["degraded_provider"] = type(self.fallback_provider).__name__
+                self.last_degraded = reason
                 return reply
-            except Exception as exc:  # noqa: BLE001 - 端点异常在这里统一收敛
-                last_error = exc
-                if attempt + 1 >= attempts or not _retryable(exc):
-                    break
-                await asyncio.sleep(self.retry_delay * (attempt + 1))
-        if self.fallback_provider is not None:
-            try:
-                reply = await self.fallback_provider.complete(trimmed, tools)
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"主备模型均不可用：{_describe(last_error)} / {_describe(exc)}"
-                ) from exc
-            self.usage.record(reply.get("usage"))
-            reason = _describe(last_error)
-            reply["degraded"] = reason
-            reply["degraded_provider"] = type(self.fallback_provider).__name__
-            self.last_degraded = reason
-            return reply
-        raise last_error if last_error else RuntimeError("provider 调用失败")
+            raise last_error if last_error else RuntimeError("provider 调用失败")
+        except BaseException:
+            ok = False
+            raise
+        finally:
+            if self.telemetry is not None and session_id:
+                self.telemetry.record(
+                    session_id,
+                    "model.complete",
+                    kind="model",
+                    ok=ok,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    attributes={"messages": len(messages), "tools": len(tools)},
+                )
 
     async def _emit(self, callback: Callable[[dict[str, Any]], Any] | None, event: dict[str, Any]) -> None:
         if callback is None:
@@ -317,6 +359,8 @@ class Agent:
         preferences = self.memory.top("preference", limit=5)
         seen = {item["id"] for item in preferences}
         recalled = [item for item in self.memory.recall(task, limit=8) if item["id"] not in seen]
+        # 记录本次注入的记忆，任务结束后据此回写权重（命中且成功加分，失败降权）。
+        self._recalled_ids = [item["id"] for item in preferences + recalled]
 
         sections: list[str] = []
         working_text = self.working.context_text() if self.working is not None else ""
@@ -359,6 +403,16 @@ class Agent:
         )
         if ids:
             self.audit.append(session_id, "memory_write", count=len(ids), ids=ids)
+        # 取消不代表记忆无效，不做降权；只有真正完成/失败才回写效果。
+        if self._recalled_ids and status != "cancelled":
+            self.memory.feedback(self._recalled_ids, status == "completed")
+            self.audit.append(
+                session_id,
+                "memory_feedback",
+                ids=list(self._recalled_ids),
+                ok=status == "completed",
+            )
+            self._recalled_ids = []
 
     async def run(
         self,
@@ -403,6 +457,10 @@ class Agent:
             history = []
         else:
             task = existing["task"]
+
+        # 只有在真正恢复已有进度的会话时才允许回放工具结果；
+        # 单次运行内模型重复发起同一调用属于用户意图，照常执行。
+        self._allow_replay = bool(history)
 
         assert session_id is not None
         self.audit.append(session_id, "start", task=task, resumed=bool(history))
@@ -463,7 +521,7 @@ class Agent:
                     "steps": step - 1,
                     "usage": self.usage.snapshot(),
                 }
-            reply = await self._complete(messages, tools)
+            reply = await self._complete(messages, tools, session_id)
             content = reply.get("content")
             tool_calls = reply.get("tool_calls") or []
 
@@ -508,7 +566,7 @@ class Agent:
                     break
                 call_id = tc.get("id") or f"call_{step}_{index}"
                 await self._emit(on_event, {"type": "tool_start", "tool": tc["name"]})
-                result = await self._execute(tc["name"], tc.get("arguments") or {}, call_id, session_id)
+                result = await self._execute(tc["name"], tc.get("arguments") or {}, call_id, session_id, step=step)
                 if not (result.error or "").startswith("permission denied"):
                     recipe_steps.append(
                         {"tool": tc["name"], "arguments": tc.get("arguments") or {}, "ok": result.ok}
@@ -573,7 +631,7 @@ class Agent:
             if self.cancel_event.is_set():
                 result = ToolResult(call_id="plan_1", ok=False, error="cancelled")
             else:
-                result = await self._execute(tool, arguments, "plan_1", session_id)
+                result = await self._execute(tool, arguments, "plan_1", session_id, step=1)
             await self._emit(
                 on_event,
                 {"type": "tool_end", "tool": tool, "ok": result.ok, "error": result.error},
@@ -617,7 +675,7 @@ class Agent:
                     {"role": "assistant", "content": f"[计划] 调用 {tool}"},
                 )
                 await self._emit(on_event, {"type": "tool_start", "tool": tool})
-                result = await self._execute(tool, arguments, f"plan_{index}", session_id)
+                result = await self._execute(tool, arguments, f"plan_{index}", session_id, step=index)
                 await self._emit(
                     on_event,
                     {"type": "tool_end", "tool": tool, "ok": result.ok, "error": result.error},
@@ -706,7 +764,7 @@ class Agent:
         for _ in range(rounds):
             if self.cancel_event.is_set() or self.usage.exceeded():
                 return None
-            reply = await self._complete(messages, tools)
+            reply = await self._complete(messages, tools, session_id)
             calls = reply.get("tool_calls") or []
             if not calls:
                 return None
@@ -716,6 +774,7 @@ class Agent:
                 chosen.get("arguments") or {},
                 "repair_1",
                 session_id,
+                step=0,
             )
             if result.ok:
                 return result
@@ -729,7 +788,7 @@ class Agent:
 
     async def _execute(
         self, tool_name: str, arguments: dict[str, Any], call_id: str, session_id: str,
-        use_cache: bool = True,
+        use_cache: bool = True, step: int = 0,
     ) -> ToolResult:
         spec = self.registry.get(tool_name)
         if spec is None:
@@ -751,7 +810,50 @@ class Agent:
         if not decision.allowed:
             return ToolResult(call_id=call_id, ok=False, error=f"permission denied: {decision.reason}")
 
-        result = await self.registry.call(call, use_cache=use_cache)
+        args_hash = ToolJournal.key(spec.name, arguments)
+        replayable = spec.idempotent and spec.risk in (Risk.READ, Risk.REVERSIBLE)
+        if self.journal is not None and replayable and self._allow_replay:
+            hit = self.journal.succeeded(session_id, args_hash)
+            if hit is not None:
+                self.audit.append(session_id, "tool_replay", tool=spec.name, step=step)
+                if self.telemetry is not None:
+                    self.telemetry.record(
+                        session_id,
+                        spec.name,
+                        kind="tool",
+                        duration_ms=0,
+                        attributes={"replayed": True, "step": step},
+                    )
+                return ToolResult(
+                    call_id=call_id,
+                    ok=True,
+                    content=hit["preview"],
+                    meta={"replayed": True},
+                )
+
+        started = time.perf_counter()
+        attempts = 0
+        max_attempts = 1 + (self.tool_retries if spec.idempotent else 0)
+        while True:
+            attempts += 1
+            result = await self.registry.call(call, use_cache=use_cache)
+            if (
+                result.ok
+                or attempts >= max_attempts
+                or self.cancel_event.is_set()
+                or not _tool_retryable_error(result.error)
+            ):
+                break
+            self.audit.append(
+                session_id,
+                "tool_retry",
+                tool=spec.name,
+                attempt=attempts,
+                error=result.error,
+            )
+            await asyncio.sleep(min(2.0, 0.2 * (2 ** (attempts - 1))))
+
+        elapsed = int((time.perf_counter() - started) * 1000)
         self.audit.append(
             session_id,
             "tool_call",
@@ -759,8 +861,29 @@ class Agent:
             arguments=arguments,
             ok=result.ok,
             error=result.error,
-            elapsed_ms=result.elapsed_ms,
+            elapsed_ms=elapsed,
+            attempts=attempts,
         )
+        if self.telemetry is not None:
+            self.telemetry.record(
+                session_id,
+                spec.name,
+                kind="tool",
+                ok=result.ok,
+                duration_ms=elapsed,
+                attributes={"step": step, "attempts": attempts},
+            )
+        if self.journal is not None:
+            self.journal.record(
+                session_id,
+                spec.name,
+                args_hash,
+                status="ok" if result.ok else "failed",
+                step=step,
+                attempts=attempts,
+                elapsed_ms=elapsed,
+                preview=result.content if isinstance(result.content, str) else "",
+            )
         self._register_artifacts(session_id)
         return result
 
@@ -834,7 +957,7 @@ class Agent:
             await self._emit(on_event, {"type": "tool_start", "tool": step["tool"]})
             result = await self._execute(
                 step["tool"], step.get("arguments") or {}, f"replay_{index}", session_id,
-                use_cache=False,
+                use_cache=False, step=index,
             )
             if not result.ok:
                 failures += 1

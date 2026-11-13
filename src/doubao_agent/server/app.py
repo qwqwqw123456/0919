@@ -249,6 +249,14 @@ def create_app(config: Config) -> FastAPI:
     async def session_audit(session_id: str) -> list[dict[str, Any]]:
         return rt().agent.audit.read(session_id)
 
+    @app.get("/api/metrics")
+    async def metrics(session: str | None = None) -> dict[str, Any]:
+        return rt().telemetry.summary(session)
+
+    @app.get("/api/sessions/{session_id}/trace")
+    async def session_trace(session_id: str) -> list[dict[str, Any]]:
+        return rt().telemetry.list(session_id)
+
     @app.post("/api/sessions/{session_id}/resume")
     async def resume_session(session_id: str) -> dict[str, Any]:
         runtime = rt()
@@ -330,13 +338,14 @@ def create_app(config: Config) -> FastAPI:
         subtasks = (payload or {}).get("subtasks")
         if subtasks is not None and isinstance(subtasks, list):
             subtasks = [str(s).strip() for s in subtasks if str(s).strip()]
+        review = bool((payload or {}).get("review", False))
 
         runtime = rt()
 
         async def _background() -> None:
             try:
                 await runtime.make_coordinator().run_parallel(
-                    task, subtasks=subtasks, on_event=bus.publish
+                    task, subtasks=subtasks, on_event=bus.publish, review=review
                 )
             except Exception as exc:  # noqa: BLE001 - keep the console alive
                 bus.publish({"type": "finish", "task": task, "answer": f"{type(exc).__name__}: {exc}"})
