@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
+import uvicorn
 from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from starlette.applications import Starlette
+from starlette.routing import Route
 
 from .registry import CapabilityRegistry
 from .types import Risk, ToolCall
@@ -16,6 +21,9 @@ _READONLY = {Risk.READ}
 _ALL = {Risk.READ, Risk.REVERSIBLE, Risk.IRREVERSIBLE, Risk.SENIOR}
 
 _SERVER_NAME = "doubao-agent"
+_DEFAULT_HTTP_HOST = "127.0.0.1"
+_DEFAULT_HTTP_PORT = 8766
+_DEFAULT_HTTP_PATH = "/mcp"
 
 
 def _exposed_risks(expose: str) -> set[Risk]:
@@ -80,3 +88,36 @@ async def serve(registry: CapabilityRegistry, expose: str = "read") -> None:
     init_options = server.create_initialization_options()
     async with stdio_server() as (read, write):
         await server.run(read, write, init_options)
+
+
+def build_http_app(server: Server[Any], path: str = _DEFAULT_HTTP_PATH) -> Starlette:
+    """把已构造的 MCP server 包装成 Streamable HTTP ASGI 应用。"""
+    manager = StreamableHTTPSessionManager(server)
+
+    @asynccontextmanager
+    async def lifespan(_app: Starlette):
+        async with manager.run():
+            yield
+
+    class _MCPASGI:
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            await manager.handle_request(scope, receive, send)
+
+    return Starlette(routes=[Route(path, endpoint=_MCPASGI())], lifespan=lifespan)
+
+
+async def serve_http(
+    registry: CapabilityRegistry,
+    expose: str = "read",
+    host: str = _DEFAULT_HTTP_HOST,
+    port: int = _DEFAULT_HTTP_PORT,
+    path: str = _DEFAULT_HTTP_PATH,
+) -> None:
+    """以 Streamable HTTP 传输运行 MCP server，阻塞直到服务关闭。
+
+    默认只绑本机回环地址；对外网暴露需显式改 host，并确认已做访问控制。
+    """
+    server = build_server(registry, expose)
+    app = build_http_app(server, path=path)
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    await uvicorn.Server(config).serve()

@@ -2,7 +2,7 @@
 
 > 本清单只登记当前源码实际暴露的调用形态，来源为 `src/doubao_agent/` 实读与本地实跑，不凭记忆补写。
 >
-> 实跑基线：`src/` 下 48 个 Python 文件 / 8307 行；测试 30 个文件、175 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 2（`system.status` / `system.net_check`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
+> 实跑基线：`src/` 下 48 个 Python 文件 / 8371 行；测试 30 个文件、177 passed。注册表工具随通道装配：静态内置为 builtin 2（`script.run_python` / `script.run_shell`）+ system 2（`system.status` / `system.net_check`）+ knowledge 2（`knowledge.search` / `knowledge.add`）；`skill` 通道仅在技能目录扫描到至少一个技能时挂载；mcp / api / native / browser / desktop 按配置与宿主可达性条件触发（见第 3 节）。离线 golden 评估集见 `eval/golden/`，判定器 `eval/runner.py`。
 > 源码根：`src/doubao_agent/`；入口脚本 `doubao-agent = doubao_agent.cli:main`。
 
 ---
@@ -83,7 +83,7 @@
 | `sources` | — | 检查各接入通道健康状态 |
 | `skills` | `[list\|reload\|install\|uninstall]`；`target?` | 列出技能；`reload` 热扫描并刷新注册表；`install <目录>` 校验 `SKILL.md` 后复制进 `skills_dir`（同名拒绝覆盖）；`uninstall <名称>` 仅删技能根目录内的目录，越界拒绝 |
 | `mcp` | `[list\|add\|remove]`；`name?`；`--url`；`--transport`；`--command`；`--args` | `list` 打印生效的 MCP（含启动时合并的本地登记）；`add/remove` 只写 `<db_path 所在目录>/mcp.local.yaml`，下次启动合并进 `mcp_servers`，不改 `agent.yaml`；stdio 用 `--command/--args`，http/sse 用 `--url/--transport`（默认 http） |
-| `mcp-serve` | `--expose read\|all`（默认 `read`） | 把注册表工具作为标准 MCP server 经 **stdio** 对外暴露，供外部 MCP client 挂载。`read` 仅暴露 L0 只读工具（默认；外部调用绕过本地审批链，不可逆动作不对外）；`all` 放开全部风险等级，仅限本机受控场景。调用走注册表 `call`，复用限流 / 缓存 / 并发 |
+| `mcp-serve` | `--expose read\|all`（默认 `read`）；`--transport stdio\|http`（默认 `stdio`）；`--host`（默认 `127.0.0.1`）；`--port`（默认 `8766`） | 把注册表工具作为标准 MCP server 对外暴露，供外部 MCP client 挂载。`stdio` 走子进程标准输入输出；`http` 为 Streamable HTTP，端点 `/mcp`，用 URL 直挂（如 `http://127.0.0.1:8766/mcp`），默认仅绑本机回环。`read` 仅暴露 L0 只读工具（默认；外部调用绕过本地审批链，不可逆动作不对外）；`all` 放开全部风险等级，仅限本机受控场景。调用走注册表 `call`，复用限流 / 缓存 / 并发 |
 | `metrics` | `--session <id>?`；`--detail` | 输出 span 汇总：总数、失败数、总耗时、平均耗时、按类型/工具的计数与最慢 5 条；省略 `--session` 为全局视图；`--detail` 按顺序列出该会话全部 span |
 | `sessions` | — | 列出最近会话 |
 | `resume` | `session_id` | 从检查点恢复会话 |

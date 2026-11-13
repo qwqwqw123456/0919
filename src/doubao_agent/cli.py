@@ -17,7 +17,7 @@ from .core.audit import AuditLog
 from .core.evolution import EvolutionStore
 from .core.recipe import RecipeStore
 from .core.memory import KINDS as MEMORY_KINDS
-from .mcp_server import serve
+from .mcp_server import serve, serve_http
 from .runtime import Runtime
 from .types import ToolCall, ToolSpec
 
@@ -713,7 +713,18 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
             expose = args.expose or os.environ.get("AGENT_MCP_SERVER_EXPOSE", "read")
             if expose not in ("read", "all"):
                 expose = "read"
-            await serve(runtime.registry, expose=expose)
+            transport = args.transport or os.environ.get(
+                "AGENT_MCP_SERVER_TRANSPORT", "stdio"
+            )
+            if transport == "http":
+                host = args.host or os.environ.get("AGENT_MCP_SERVER_HOST", "127.0.0.1")
+                port = int(
+                    args.port
+                    or os.environ.get("AGENT_MCP_SERVER_PORT", "8766")
+                )
+                await serve_http(runtime.registry, expose=expose, host=host, port=port)
+            else:
+                await serve(runtime.registry, expose=expose)
             return 0
 
         if args.cmd == "metrics":
@@ -780,13 +791,25 @@ def main(argv: list[str] | None = None) -> int:
     mcp_parser.add_argument("--command", default=None, help="stdio 启动命令")
     mcp_parser.add_argument("--args", nargs="*", default=None, help="stdio 命令参数")
     mcp_serve_parser = sub.add_parser(
-        "mcp-serve", help="把注册表工具暴露为标准 MCP server（stdio，默认仅 L0 只读）"
+        "mcp-serve", help="把注册表工具暴露为标准 MCP server（默认 stdio，仅 L0 只读）"
     )
     mcp_serve_parser.add_argument(
         "--expose",
         choices=["read", "all"],
         default=None,
         help="read 仅暴露 L0 只读（默认）；all 放开全部风险等级，仅限本机受控场景",
+    )
+    mcp_serve_parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default=None,
+        help="stdio 子进程标准输入输出（默认）；http 为 Streamable HTTP，用 URL 直挂",
+    )
+    mcp_serve_parser.add_argument(
+        "--host", default=None, help="http 传输绑定地址，默认 127.0.0.1（仅本机）"
+    )
+    mcp_serve_parser.add_argument(
+        "--port", type=int, default=None, help="http 传输端口，默认 8766"
     )
     metrics_parser = sub.add_parser("metrics", help="可观测指标：span 汇总 / 慢调用 / 失败数")
     metrics_parser.add_argument("--session", default=None, help="只看指定会话")
