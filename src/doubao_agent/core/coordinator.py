@@ -100,9 +100,12 @@ class Coordinator:
 
     async def decompose(self, task: str) -> list[str]:
         """一次模型调用，把复杂任务拆成可并行的子任务。拆解失败则整体作为一个子任务。"""
-        reply = await self.provider.complete(
-            [{"role": "user", "content": _DECOMPOSE_PROMPT.format(task=task)}], []
-        )
+        try:
+            reply = await self.provider.complete(
+                [{"role": "user", "content": _DECOMPOSE_PROMPT.format(task=task)}], []
+            )
+        except Exception:
+            return [task]
         subtasks = _parse_string_list(reply.get("content") or "")
         return subtasks or [task]
 

@@ -186,7 +186,10 @@ def _status_of(exc: Exception) -> int | None:
         value = getattr(exc, attr, None)
         if isinstance(value, int):
             return value
-    return None
+    # httpx.HTTPStatusError 只把状态码挂在 response 上。
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
 
 
 def _describe(exc: Exception) -> str:
@@ -279,6 +282,8 @@ class Agent:
         self.retry_delay = max(0.0, retry_delay)
         self.model_summary = model_summary
         self.last_degraded: str | None = None
+        # 本次 run 是否发生过降级；成功调用不会清掉，供最终结果标注。
+        self._degraded_reason: str | None = None
         self.journal = journal
         self.telemetry = telemetry
         self.tool_retries = max(0, int(tool_retries))
@@ -299,6 +304,7 @@ class Agent:
     ) -> dict[str, Any]:
         started = time.perf_counter()
         ok = True
+        degraded_reason: str | None = None
         try:
             model_note: str | None = None
             if self.model_summary and type(self.provider).__name__ != "MockProvider":
@@ -328,9 +334,11 @@ class Agent:
                     ) from exc
                 self.usage.record(reply.get("usage"))
                 reason = _describe(last_error)
+                degraded_reason = reason
                 reply["degraded"] = reason
                 reply["degraded_provider"] = type(self.fallback_provider).__name__
                 self.last_degraded = reason
+                self._degraded_reason = reason
                 return reply
             raise last_error if last_error else RuntimeError("provider 调用失败")
         except BaseException:
@@ -338,13 +346,19 @@ class Agent:
             raise
         finally:
             if self.telemetry is not None and session_id:
+                attributes: dict[str, Any] = {
+                    "messages": len(messages),
+                    "tools": len(tools),
+                }
+                if degraded_reason:
+                    attributes["degraded"] = degraded_reason
                 self.telemetry.record(
                     session_id,
                     "model.complete",
                     kind="model",
                     ok=ok,
                     duration_ms=int((time.perf_counter() - started) * 1000),
-                    attributes={"messages": len(messages), "tools": len(tools)},
+                    attributes=attributes,
                 )
 
     async def _emit(self, callback: Callable[[dict[str, Any]], Any] | None, event: dict[str, Any]) -> None:
@@ -442,6 +456,7 @@ class Agent:
         on_event: Callable[[dict[str, Any]], Any] | None = None,
         images: list[str] | None = None,
     ) -> dict[str, Any]:
+        self._degraded_reason = None
         existing = self.sessions.get(session_id) if session_id else None
         history = self.sessions.messages(session_id) if existing else []
         # 只有真正有进度的会话才算恢复；预创建的空会话仍然走入口规划。
@@ -480,6 +495,7 @@ class Agent:
         step = int(checkpoint["step"]) if checkpoint else 0
         answer = ""
         recipe_steps: list[dict[str, Any]] = []
+        degraded_notified = False
 
         while step < self.max_steps:
             if self.cancel_event.is_set():
@@ -487,6 +503,7 @@ class Agent:
                 self.sessions.finish(session_id, answer, "cancelled")
                 self.audit.append(
                     session_id, "finish", step=step, answer=answer, cancelled=True,
+                    degraded=self._degraded_reason,
                     usage=self.usage.snapshot(),
                 )
                 self._consolidate(task, answer, "cancelled", step, session_id, None)
@@ -496,20 +513,17 @@ class Agent:
                     "status": "cancelled",
                     "answer": answer,
                     "steps": step,
+                    "degraded": self._degraded_reason,
                     "usage": self.usage.snapshot(),
                 }
             step += 1
-            if self.last_degraded and reply.get("content"):
-                reply["content"] = (
-                    f"⚠️ 模型端点曾不可用（{self.last_degraded}），本次已切备用 provider，以下为降级答复：\n\n"
-                    + str(reply.get("content"))
-                )
             budget = self.usage.exceeded()
             if budget:
                 answer = budget
                 self.sessions.finish(session_id, answer, "incomplete")
                 self.audit.append(
                     session_id, "finish", step=step - 1, answer=answer, budget=True,
+                    degraded=self._degraded_reason,
                     usage=self.usage.snapshot(),
                 )
                 self._consolidate(task, answer, "incomplete", step - 1, session_id, None)
@@ -519,9 +533,26 @@ class Agent:
                     "status": "incomplete",
                     "answer": answer,
                     "steps": step - 1,
+                    "degraded": self._degraded_reason,
                     "usage": self.usage.snapshot(),
                 }
             reply = await self._complete(messages, tools, session_id)
+            if self._degraded_reason and not degraded_notified:
+                degraded_notified = True
+                self.audit.append(
+                    session_id,
+                    "degraded",
+                    reason=self._degraded_reason,
+                    provider=reply.get("degraded_provider"),
+                )
+                await self._emit(
+                    on_event,
+                    {
+                        "type": "degraded",
+                        "reason": self._degraded_reason,
+                        "provider": reply.get("degraded_provider"),
+                    },
+                )
             content = reply.get("content")
             tool_calls = reply.get("tool_calls") or []
 
@@ -545,9 +576,19 @@ class Agent:
 
             if not tool_calls:
                 answer = content or ""
-                self.sessions.finish(session_id, answer)
+                if self._degraded_reason:
+                    answer = (
+                        f"⚠️ 主模型端点不可用（{self._degraded_reason}），"
+                        f"本次答复由备用 provider 生成。\n\n{answer}"
+                    )
+                self.sessions.finish(session_id, answer, "completed")
                 self.audit.append(
-                    session_id, "finish", step=step, answer=answer, usage=self.usage.snapshot()
+                    session_id,
+                    "finish",
+                    step=step,
+                    answer=answer,
+                    degraded=self._degraded_reason,
+                    usage=self.usage.snapshot(),
                 )
                 recipe_id = self._record_recipe(task, session_id, recipe_steps, on_event)
                 self._consolidate(task, answer, "completed", step, session_id, recipe_id)
@@ -558,6 +599,7 @@ class Agent:
                     "answer": answer,
                     "steps": step,
                     "recipe_id": recipe_id,
+                    "degraded": self._degraded_reason,
                     "usage": self.usage.snapshot(),
                 }
 
@@ -597,6 +639,7 @@ class Agent:
             "status": "incomplete",
             "answer": reason,
             "steps": step,
+            "degraded": self._degraded_reason,
             "usage": self.usage.snapshot(),
         }
 
@@ -712,9 +755,24 @@ class Agent:
             status = "cancelled"
         else:
             status = "completed" if ok else "incomplete"
+        degraded = self._degraded_reason
+        if degraded:
+            answer = (
+                f"⚠️ 主模型端点不可用（{degraded}），本次结果由备用 provider 生成。\n\n{answer}"
+            )
+            self.audit.append(session_id, "degraded", reason=degraded)
+            await self._emit(on_event, {"type": "degraded", "reason": degraded})
         step_count = max(1, len(steps))
         self.sessions.finish(session_id, answer, status)
-        self.audit.append(session_id, "finish", step=step_count, answer=answer, planned=True, usage=self.usage.snapshot())
+        self.audit.append(
+            session_id,
+            "finish",
+            step=step_count,
+            answer=answer,
+            planned=True,
+            degraded=degraded,
+            usage=self.usage.snapshot(),
+        )
         recipe_id = self._record_recipe(task, session_id, steps, on_event) if ok and steps else None
         self._consolidate(task, answer, status, step_count, session_id, recipe_id)
         await self._emit(on_event, {"type": "finish", "session": session_id, "answer": answer})
@@ -725,6 +783,7 @@ class Agent:
             "steps": step_count,
             "recipe_id": recipe_id,
             "planned": True,
+            "degraded": degraded,
             "usage": self.usage.snapshot(),
         }
 

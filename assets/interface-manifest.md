@@ -97,7 +97,7 @@
 | `audit` | `[verify\|sessions\|export]`；`session?`；`--out` | `verify` 重算哈希链；`sessions` 列出有审计的会话；`export` 校验通过后导出副本（默认 `runs/<session>/audit.export.jsonl`），链损坏拒绝导出 |
 | `evolve` | `action`；`target?`；`--apply`；`--top=10`；`--force` | `status` 用量排行 / `audit` 生命周期流转（默认预演，`--apply` 才执行）/ `pin`·`unpin` 钉住 / `distill` 配方转技能草案（`--force` 覆盖已有草案）/ `report` 周报 |
 | `parallel` | `task`；`--subtasks a,b,c`；`--review` | 并行协同；省略子任务则先由模型拆解；`--review` 追加审阅者角色，合并结果并指出冲突 |
-| `serve` | `--port` | 启动本地控制台（uvicorn） |
+| `serve` | `--port`、`--host` | 启动本地控制台（uvicorn）；默认 `127.0.0.1`，非回环地址必须配置 `auth_token` |
 | `daemon` | `action`；`--port` | `start / stop / status`，子进程崩溃按退避重启 |
 
 ---
@@ -148,6 +148,7 @@
 | `start` | `session`、`task`、可选 `mode` | 任务/规划开始 |
 | `tool_start` | `tool` | 工具调用前 |
 | `tool_end` | `tool`、`ok`、`error` | 工具返回后 |
+| `degraded` | `reason`、可选 `provider` | 主模型失败、切换备用 provider 后 |
 | `subtasks` | `task`、`subtasks`、`count` | 并行拆解结果 |
 | `review` | `task`、`verdict`、`conflicts` | 审阅者给出合并结论（`--review` / `review=true`） |
 | `finish` | `session`、`answer`、可选 `subtasks` | 任务收尾 |

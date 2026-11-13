@@ -38,6 +38,17 @@ def test_parse_plan_accepts_fenced_json_and_rejects_noise() -> None:
     assert parse_plan('{"mode":"script"}') is None
 
 
+async def test_decompose_falls_back_to_single_task_on_provider_error() -> None:
+    from doubao_agent.core.coordinator import Coordinator
+
+    class BrokenProvider:
+        async def complete(self, messages, tools):
+            raise TimeoutError("decompose timeout")
+
+    coordinator = Coordinator(lambda: None, BrokenProvider())
+    assert await coordinator.decompose("一个复杂任务") == ["一个复杂任务"]
+
+
 async def test_entry_planning_executes_script_with_single_model_call(tmp_path) -> None:
     from doubao_agent.core.planner import Planner
     from doubao_agent.sources.script import ScriptSource

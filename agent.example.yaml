@@ -11,7 +11,7 @@ auto_approve:
     reason: 仅允许发送给本人
   # - tool: "script.*"
   #   risk: L1
-script_risk: L1                 # 脚本通道风险：L1 直接执行，L2 起需确认
+script_risk: L2                 # 脚本通道风险：默认 L2 需确认；改回 L1 前请确认已理解风险
 script_max_cpu: 0               # 脚本 CPU 时间上限（秒），0 表示不限
 record_recipes: true            # 成功任务自动录制为配方，可零模型回放
 planning:

@@ -1,20 +1,35 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
 @dataclass
 class UsageMeter:
-    """进程级调用计量：调用次数 + token，并可设置预算上限（0 表示不限）。"""
+    """调用计量：可派生 run 级子计量，子计量独立判预算，父级只做累计统计。"""
 
     calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
     max_calls: int = 0
     max_tokens: int = 0
+    parent: "UsageMeter | None" = field(default=None, repr=False, compare=False)
+
+    def child(self) -> "UsageMeter":
+        """派生一个预算相同但计数独立的子计量，用于单次运行/单个子任务。"""
+        return UsageMeter(
+            max_calls=self.max_calls,
+            max_tokens=self.max_tokens,
+            parent=self,
+        )
 
     def record(self, usage: dict[str, Any] | None) -> None:
+        meter: UsageMeter | None = self
+        while meter is not None:
+            meter._add(usage)
+            meter = meter.parent
+
+    def _add(self, usage: dict[str, Any] | None) -> None:
         self.calls += 1
         if not usage:
             return

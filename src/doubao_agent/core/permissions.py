@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from fnmatch import fnmatchcase
@@ -15,6 +16,33 @@ _RISK_RANK = {
     Risk.IRREVERSIBLE: 2,
     Risk.SENIOR: 3,
 }
+
+# 脚本通道是任意代码执行，静态风险等级不足以覆盖破坏性命令；命中即升级到 L3。
+_SCRIPT_DANGER_PATTERNS = (
+    r"\brm\s+-(?:[a-z]*r[a-z]*f|[a-z]*f[a-z]*r)\b",
+    r"\brm\s+-r\b[^\n]*\s-f\b",
+    r"\b(?:sudo|mkfs(?:\.[a-z0-9]+)?|shutdown|reboot|halt|poweroff)\b",
+    r"\bdd\s+if=",
+    r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:ba)?sh\b",
+    r"\bchmod\s+(?:-R\s+)?777\b",
+    r">\s*/(?:etc|usr|bin|sbin|boot|dev)/",
+    r"\b(?:iptables|nft|ufw)\s+",
+    r"\bgit\s+push\b[^\n]*--force\b",
+    r"\bshred\b",
+    r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",
+)
+
+
+def _script_dangerous(call: ToolCall) -> bool:
+    text = "\n".join(str(value) for value in call.arguments.values())
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in _SCRIPT_DANGER_PATTERNS)
+
+
+def _effective_risk(spec: ToolSpec, call: ToolCall) -> Risk:
+    """脚本工具按实际参数动态升级风险，避免 L2 配置放行破坏性命令。"""
+    if (spec.source == "script" or spec.name.startswith("script.")) and _script_dangerous(call):
+        return Risk.SENIOR
+    return spec.risk
 
 
 class PermissionMode(str, Enum):
@@ -52,7 +80,7 @@ class PolicyRule:
             reason=str(item.get("reason") or "预授权规则"),
         )
 
-    def allows(self, spec: ToolSpec, call: ToolCall) -> bool:
+    def allows(self, spec: ToolSpec, call: ToolCall, risk: Risk | None = None) -> bool:
         # 注册表会把工具名限定为 `<source>.<name>`，规则按裸名或全名都应能命中。
         names = {spec.name, spec.name.rsplit(".", 1)[-1]}
         if not any(fnmatchcase(name, self.tool) for name in names):
@@ -61,7 +89,7 @@ class PolicyRule:
             ceiling = _RISK_RANK[Risk(self.risk)]
         except (KeyError, ValueError):
             return False
-        if _RISK_RANK[spec.risk] > ceiling:
+        if _RISK_RANK[risk or spec.risk] > ceiling:
             return False
         return all(call.arguments.get(key) == value for key, value in self.arguments.items())
 
@@ -85,15 +113,16 @@ class PermissionPolicy:
             for rule in rules or []
         ]
 
-    def _match_rule(self, spec: ToolSpec, call: ToolCall) -> PolicyRule | None:
-        return next((rule for rule in self.rules if rule.allows(spec, call)), None)
+    def _match_rule(
+        self, spec: ToolSpec, call: ToolCall, risk: Risk | None = None
+    ) -> PolicyRule | None:
+        return next((rule for rule in self.rules if rule.allows(spec, call, risk)), None)
 
     async def authorize(self, spec: ToolSpec, call: ToolCall) -> Decision:
-        rule = self._match_rule(spec, call)
+        risk = _effective_risk(spec, call)
+        rule = self._match_rule(spec, call, risk)
         if rule is not None:
             return Decision(True, False, f"policy: {rule.reason}")
-
-        risk = spec.risk
 
         if self.mode is PermissionMode.AUTO:
             if risk is Risk.SENIOR:

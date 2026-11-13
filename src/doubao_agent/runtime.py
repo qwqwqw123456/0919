@@ -236,11 +236,17 @@ class Runtime:
         return count
 
     def spawn_agent(self) -> Agent:
-        """创建一个独立 Agent 实例用于并行协同。
+        """创建一个独立 Agent 实例用于单次运行/并行协同。
 
-        共享工具注册表、模型、权限策略、审计、记忆、配方与计量，仅取消信号独立，
-        因此子任务并发执行互不干扰，且成本计入同一份计量。
+        共享工具注册表、模型、权限策略、审计、记忆与配方，仅取消信号和预算计量独立：
+        每次 run 拿到同等预算的子计量，父级只做累计统计。
         """
+        run_usage = self.usage.child()
+        planner = (
+            Planner(self.provider, self.skills, run_usage)
+            if self.config.planning_enabled
+            else None
+        )
         return Agent(
             registry=self.registry,
             provider=self.provider,
@@ -251,12 +257,16 @@ class Runtime:
             max_steps=self.config.max_steps,
             recipes=self.recipes,
             record_recipes=self.config.record_recipes,
-            planner=self.agent.planner,
-            usage=self.usage,
+            planner=planner,
+            usage=run_usage,
             context_limit=self.config.context_limit,
             cancel_event=asyncio.Event(),
             working=self.working,
             repair_rounds=self.config.repair_rounds,
+            fallback_provider=self.agent.fallback_provider,
+            provider_retries=self.agent.provider_retries,
+            retry_delay=self.agent.retry_delay,
+            model_summary=self.agent.model_summary,
             journal=self.journal,
             telemetry=self.telemetry,
             tool_retries=self.config.tool_retries,

@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 47 个 Python 文件 / 8208 行 / 29 测试文件 / 171 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（阶段 0 加固后：47 个 Python 文件 / 8340 行 / 30 测试文件 / 179 passed；基线 commit `7f0972b`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
@@ -10,12 +10,13 @@
 | 三层记忆 + 检索 | `working_state` / `lessons·observations·deviations` / `documents·chunks`；知识库同步+异步检索，向量失败退回关键词混合 |
 | 上下文压缩 | `core/agent.py` `_trim_messages`：保留 system + 最近消息，对齐 user 边界；被裁早期 user 要点并入 system 注记 |
 | 调度 / 并行 / 续跑 / 重放 | `schedules` cron；`parallel` 子任务；检查点 + `resume`；配方 `replay` 零模型重放 |
-| 权限与审计 | 风险 L0–L3；`auto / guarded / manual`；审计追加式哈希链 JSONL，凭据字段递归脱敏 |
-| 预算与修正 | `max_calls` / `max_tokens` / `repair_rounds`；超限以 `incomplete` 收尾 |
+| 权限与审计 | 风险 L0–L3；`auto / guarded / manual`；脚本通道默认 L2，命中破坏性命令动态升 L3；审计追加式哈希链 JSONL，按字段名递归脱敏（值级密钥模式脱敏覆盖长期记忆，审计正文内嵌密钥仍待补） |
+| 预算与修正 | `max_calls` / `max_tokens` 为每次 run 独立预算（子计量），父级只做累计统计；`repair_rounds`；超限以 `incomplete` 收尾 |
 | 注入防护 | 工具/网页/文件输出用不可信头脚包裹，其中指令不得执行（`_UNTRUSTED_HEADER/FOOTER`） |
 | 守护自愈 | `daemon` 子进程退出按退避重启，SIGTERM 优雅收尾 |
 | 自进化 | `skill_usage` 用量台账、active→stale→archived 生命周期、pin 保护、配方蒸馏草案 |
 | 触发与并发 | 控制台 `POST /api/run`、`/api/webhook`（令牌/HMAC 签名）、`/api/parallel`、`/api/schedules`；全局 `Semaphore(3)` 并发闸 |
+| 控制台暴露面 | `serve` 默认 `127.0.0.1`；绑定非回环地址必须配置 `auth_token`，否则拒绝启动 |
 | 离线评估集 | `eval/golden/skills.json` 规则样例 + `eval/runner.py` 判定器，纳入 pytest 闸门；模型端到端样例占位 |
 | 多模态输入 | `run --image`（可重复，单张 ≤5MB，OpenAI `image_url`） |
 | 可靠性与可观测 | `tool_runs` 同会话幂等只读/可逆工具按参数指纹回放（L2/L3 永不重放）；`spans` 记录模型/工具耗时与成败，`metrics` 与 `GET /api/metrics`、`/api/sessions/{id}/trace` 聚合；`audit export` 先校验哈希链再导出；记忆 `feedback` 命中成功加分/失败降权、`decay` 半衰期衰减（偏好不衰减）；知识库 `domain=auto` 关键词路由；`parallel --review` 审阅者合并结果并标注冲突 |
@@ -36,7 +37,7 @@
 | --- | --- | --- | --- |
 | G4 | **凭据加密保管** | 审计参数字段递归脱敏；长期记忆落库前对 Bearer / api_key= / JWT / ak·sk 前缀模式打码；`.env.local` 600 权限且 gitignore 排除；仍无 vault/keyring 加密存储，落盘为明文 | 凭据不入日志/记忆/产物；敏感落盘可加密，或明确由平台密钥保管注入 | **部分落地**：出口脱敏已做；加密保管依赖平台 vault，运行时无主密钥来源不做假加密 |
 | G5 | **工具结果缓存与细粒度限流** | 幂等只读（L0）工具结果已按参数进程内缓存（`tool_cache_enabled`/`tool_cache_ttl`，replay 绕过缓存）；registry 按通道信号量并发上限 `tool_channel_concurrency`（0 不限），超限排队；另挂 `RateLimiter` 按通道 60 秒滑窗速率上限 `tool_rate_limits`，超限返回 `rate limited`；幂等工具遇瞬时错误按 `tool_retries` 指数退避重试；另有全局 `Semaphore(3)` | 幂等工具重复调用命中缓存；按通道设并发/速率上限，超限排队或拒绝而非压垮进程；瞬时失败可退避重试 | **已落地**：结果缓存 + 按通道并发闸 + 速率限流 + 工具瞬时重试已做 |
-| G6 | **provider 异常兜底** | `_complete` 已按 `provider_retries` 重试（401/403/404 不重试）；`provider_fallback=mock` 切内置 mock；配置 `model_fallback` 块装配备用真实 provider；主端点失败切备用并带 `degraded` 标注；默认不降级 | 模型端点失败按策略重试/降级到备用 provider 或 mock，并在结果中显式标注降级 | **已落地**：重试 + mock 兜底 + 备用真实 provider 通道 + 降级标注 |
+| G6 | **provider 异常兜底** | `_complete` 已按 `provider_retries` 重试（含 httpx 状态码，400/401/403/404 不重试）；`provider_fallback=mock` 切内置 mock；配置 `model_fallback` 块装配备用真实 provider；主路径 `spawn_agent` 透传 fallback/retries/model_summary；主端点失败切备用并把 `degraded` 写入 result/answer/事件/审计；默认不降级 | 模型端点失败按策略重试/降级到备用 provider 或 mock，并在结果中显式标注降级 | **已落地（阶段 0 加固）**：重试 + mock 兜底 + 备用真实 provider 通道 + 降级可见 |
 
 ### P2 — 感知与协作
 

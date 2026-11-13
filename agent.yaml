@@ -7,7 +7,7 @@ auto_approve:
     arguments: {target_id: self}
     risk: L2
     reason: 仅允许发送给本人
-script_risk: L1
+script_risk: L2
 script_max_cpu: 0
 record_recipes: true
 planning:

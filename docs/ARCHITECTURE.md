@@ -216,7 +216,7 @@ src/doubao_agent/
 ## 11. 调度与流式控制
 
 - **定时触发**：`schedule add "cron" "任务" [--name]` / `list` / `run` / `enable` / `disable` / `remove`。控制台/守护进程按 `scheduler_interval` 轮询到期任务并经 agent 派发，`schedule run <id>` 立即执行一次。cron 支持 `*` / `n` / `a-b` / `*/step` / `a,b`（5 段：分 时 日 月 周）。
-- **流式进度**：控制台 `GET /api/events` 以 SSE 推送 start / tool_start / tool_end / finish / schedule_start；CLI 直接打印到 stderr。
+- **流式进度**：控制台 `GET /api/events` 以 SSE 推送 start / tool_start / tool_end / degraded / finish / schedule_start；CLI 直接打印到 stderr。
 - **任务取消**：`POST /api/sessions/{id}/cancel` 或 `agent.cancel()`——置取消信号 + 杀掉正在运行的脚本进程，任务以 `cancelled` 收尾并如实审计。
 - **脚本资源限制**：`script_max_cpu`（秒，0 不限）通过 RLIMIT_CPU 限制 CPU 时间；脚本进程可被取消事件中断。
 - 配置：`scheduler_enabled` / `scheduler_interval` / `script_max_cpu`，均可由环境变量覆盖（`AGENT_SCHEDULER_ENABLED` 等）。
@@ -226,10 +226,10 @@ src/doubao_agent/
 ## 12. 并行协同
 
 - **拆解**：`Coordinator.decompose` 一次模型调用把复杂任务拆成 2~5 个互不依赖的子任务，容错解析（兼容 markdown 代码块 / 裸数组 / `{subtasks:[…]}`）；拆解失败则整体作为单任务兜底。
-- **并发执行**：`Runtime.spawn_agent()` 为每个子任务创建独立 Agent 实例——**共享**工具注册表、模型、权限策略、审计、记忆、配方与成本计量，**独立**取消信号与会话，`asyncio.gather` 真并发。
+- **并发执行**：`Runtime.spawn_agent()` 为每个子任务创建独立 Agent 实例——**共享**工具注册表、模型、权限策略、审计、记忆、配方，**独立**取消信号、会话与本次运行的预算计量（父级 `UsageMeter` 只做累计统计）。
 - **人机接管**：拆解结果先经 `subtasks` 事件流式可见；`confirm` 回调可让用户在拆解后、执行前增删改子任务；高危操作仍由权限门 `approver` 逐条确认。
 - **汇总**：子任务结果按状态拼装成结构化汇总，`completed/total` 计数，失败子任务不拖垮整体。
-- **入口**：CLI `parallel "任务" [--subtasks "a,b,c"]`；控制台 `POST /api/parallel`；共享 `UsageMeter` 让并行成本计入同一份计量。
+- **入口**：CLI `parallel "任务" [--subtasks "a,b,c"]`；控制台 `POST /api/parallel`；每个 run 独立预算，父级累计成本。
 
 ---
 

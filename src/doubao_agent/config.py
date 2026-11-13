@@ -74,7 +74,7 @@ class Config:
         )
     )
     permission_mode: str = "guarded"   # auto | guarded | manual
-    script_risk: str = "L1"            # 脚本通道的风险等级：L1 直接执行，L2 起需确认
+    script_risk: str = "L2"            # 脚本通道的风险等级：默认 L2，guarded/auto 下需确认或拒绝
     script_max_cpu: float = 0.0        # 脚本 CPU 时间上限（秒），0 表示不限
     record_recipes: bool = True        # 成功任务自动录制为可零模型回放的配方
     evolution_enabled: bool = True     # 技能用量遥测 + 生命周期审计（抄自 Hermes curator）

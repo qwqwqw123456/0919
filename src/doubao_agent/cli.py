@@ -33,6 +33,19 @@ def _make_approver():
     return approve
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _serve_binding(host: str, token: str) -> tuple[str, str | None]:
+    """校验控制台监听地址：非回环必须配置 token，避免无鉴权暴露到网络。"""
+    normalized = (host or "127.0.0.1").strip().lower()
+    if normalized in _LOOPBACK_HOSTS:
+        return normalized, None
+    if not (token or "").strip():
+        return normalized, "非回环监听必须配置 auth_token（agent.yaml 或 AGENT_AUTH_TOKEN）"
+    return normalized, None
+
+
 def _print_event(event: dict[str, Any]) -> None:
     kind = event.get("type")
     if kind == "tool_start":
@@ -859,6 +872,11 @@ def main(argv: list[str] | None = None) -> int:
 
     serve_parser = sub.add_parser("serve", help="启动本地控制台")
     serve_parser.add_argument("--port", type=int, default=None)
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="监听地址；默认仅本机。非回环地址必须配置 auth_token",
+    )
 
     daemon_parser = sub.add_parser("daemon", help="常驻守护：start / stop / status")
     daemon_parser.add_argument("action", choices=["start", "stop", "status"])
@@ -897,7 +915,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from .server.app import create_app
 
-        uvicorn.run(create_app(cfg), host="0.0.0.0", port=args.port or cfg.port)
+        host, error = _serve_binding(args.host, cfg.auth_token)
+        if error:
+            print(f"[serve] 拒绝启动：{error}", file=sys.stderr)
+            return 2
+        if host not in _LOOPBACK_HOSTS:
+            print(f"[serve] 监听 {host}，已启用 token 鉴权", file=sys.stderr)
+        uvicorn.run(create_app(cfg), host=host, port=args.port or cfg.port)
         return 0
 
     return asyncio.run(_run_cli(args, cfg))

@@ -46,7 +46,7 @@ git clone <仓库地址> && cd doubao-agent
 | `tool_rate_limits` | 按通道的每分钟调用上限，如 `{browser: 30, default: 120}` |
 | `mcp_servers` / `mcp_auto_discover` | 标准 MCP 接入；留空时启动自动探测 `127.0.0.1:8091/mcp` |
 | `bridge` | 通用 REST 宿主桥（当前云电脑未提供，保持 `enabled: false`） |
-| `auth_token` | 控制台 `/api` 鉴权；空表示不鉴权（仅本机） |
+| `auth_token` | 控制台 `/api` 鉴权；空表示不鉴权，此时 `serve` 只允许监听本机回环地址 |
 
 ## 常用命令
 
@@ -64,7 +64,7 @@ doubao-agent memory decay --days 30     # 按半衰期衰减非偏好记忆
 doubao-agent metrics [--session <ID>] [--detail]  # span 汇总 / 明细、慢调用、失败数
 doubao-agent audit verify [会话ID] | audit sessions | audit export <会话ID>
 doubao-agent parallel "任务" --review    # 并行执行 + 审阅者合并仲裁
-doubao-agent serve                     # 控制台 + SSE，默认 8765
+doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765；非回环必须配置 auth_token
 ```
 
 ## 自进化
@@ -91,7 +91,7 @@ doubao-agent serve                     # 控制台 + SSE，默认 8765
 
 `script`（Python/Shell）· `knowledge`（分块检索）· `skill`（渐进加载）· `mcp`（stdio/sse/http）· `api`（OpenAPI 声明）· `native` / `browser` / `desktop`（依赖宿主能力）。
 
-脚本通道边界：工作区内的 `cwd`、非登录 shell、超时或取消整组回收子进程。
+脚本通道边界：默认 L2 需确认，命中破坏性命令动态升 L3；工作区内的 `cwd`、非登录 shell、超时或取消整组回收子进程。
 
 ## 测试
 
