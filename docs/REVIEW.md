@@ -147,3 +147,28 @@
 | `README.md:43`、`assets/interface-manifest.md:253` | 预算"单次运行" | 同 P0-6，进程级累计 |
 | `assets/interface-manifest.md:255` | "401/403/404 不重试""切换后结果标注 degraded" | 同 P0-4、P0-5 |
 | `docs/ARCHITECTURE.md:228` | "拆解失败则整体作为单任务兜底" | `decompose` 无 try/except，异常直接传播，兜底未实现 |
+
+## 十、附：Trae 互连通路实测（2026-11-13，环境 Ubuntu 22.04 / Node 22）
+
+### 已实测落地
+
+- **CLI 安装**：`traecli 0.214.1`（官方安装脚本，用户级目录 `~/.local/bin` + `~/.trae`，无 sudo；附带 bwrap 沙箱，复用系统 ripgrep）。安装产物在 home 目录，未污染本仓库。
+- **Trae 作为 MCP client（挂外部标准 MCP server）**：`traecli mcp add <name> --url <URL>` 或 `-- <COMMAND>`，配置写入 `~/.trae/traecli.toml` 的 `[mcp_servers.*]`；`list/remove` 本地读写已实测通过。
+- **Trae 作为被调方的服务面**：
+  - `exec-server --listen ws://IP:PORT`（也支持 `stdio`）：JSON-RPC 2.0 over WebSocket，Codex app-server 契约；可 `--remote` 注册为远程 executor。
+  - `acp serve`：stdio 上的 ACP（Agent Client Protocol）服务。
+  - `app-server daemon/proxy`：本地守护 + control socket 代理。
+  - 注意：旧版文档里的 `mcp-server` 子命令在 0.214.1 **已不存在**；该版本对外暴露走 exec-server / ACP / app-server，不是标准 MCP server。
+- **握手可达**：`exec-server` 起服务后 WS 升级返回 `101 Switching Protocols`；JSON-RPC `initialize`（params `clientName`/`clientVersion`）成功，返回 `sessionId` 与 `environmentInfo`（shell、cwd、沙箱能力清单）。**未登录状态下握手层不拦连接**。
+
+### 当前卡点
+
+- **鉴权**：`doctor` 显示 `Auth: required trae, status: not_logged_in`。真实模型任务在调用层校验；无头 `exec` 先撞 CLI 内置鉴权（解析内网 `code.byted.org` 失败 / 代理 502）。登录方式：交互 `traecli login`（浏览器/设备码）、PAT 注入环境变量 `TRAE_ACCESS_TOKEN`、端点可用 `TRAE_API_BASE_URL` 覆盖。
+- **协议适配差距**：本仓库 `sources/mcp.py` 只认标准 MCP（stdio / SSE / Streamable HTTP）；接 Trae 的 exec-server/ACP 需另写一层 JSON-RPC / ACP 客户端适配，不能直接挂进现有 MCP 通道。
+- **契约参考**：`traecli app-server generate-json-schema --out <DIR>` 可导出协议 JSON Schema（本机临时目录，未纳入仓库）；协议含 initialize 握手、会话/命令执行/文件系统/配置/审批/MCP elicitation 等方法，服务端主动推消息 delta、命令输出、FS 变更等通知。
+
+### 双向打通的最小路径
+
+1. 先解决 Trae 登录态（PAT 或交互登录），在当前出口网络下验证一次无头 `traecli exec --json` 能跑通真实任务。
+2. 方向 A（Trae 调我方工具）：在我方补一个标准 MCP server 适配层，把注册表 `ToolSpec` 暴露成 MCP tools，再由 `traecli mcp add` 挂入。
+3. 方向 B（我方调 Trae）：在我方补 exec-server JSON-RPC 客户端（或 ACP 客户端），按导出的 schema 走 initialize → 会话创建 → 任务下发 → 通知接收；这对应 G9「A2A 跨进程协议」缺口。
