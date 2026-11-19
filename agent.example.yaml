@@ -34,7 +34,8 @@ max_steps: 12
 max_calls: 0        # 单次运行模型调用预算，0=不限；接真实模型时建议设上限
 max_tokens: 0       # 单次运行 token 预算，0=不限
 repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数（0=不重试）
-provider_retries: 1     # 端点异常重试次数；401/403 不重试，直接进降级判断
+provider_retries: 1     # 端点异常重试次数；400/401/403/404 不重试，直接进降级判断
+provider_retry_delay: 0.2  # 重试退避基数（秒），第 n 次重试按 n 倍放大
 provider_fallback: ""   # 备用 provider："" 不降级（默认，避免静默换模型骗人）；"mock" 用内置 mock
 tool_cache_enabled: true   # 幂等只读工具结果缓存开关；写工具/非幂等工具不缓存
 tool_cache_ttl: 60         # 结果缓存存活秒数；0 或开关关闭即不缓存
@@ -42,6 +43,8 @@ tool_channel_concurrency: 3  # 单通道工具并发上限；0 表示不限制
 tool_retries: 1     # 幂等工具遇到瞬时错误时的重试次数（0=不重试）
 tool_rate_limits: {}  # 按通道限流，如 {browser: 30, default: 120}；空=不限
 port: 8765
+serve_host: 127.0.0.1          # 控制台监听地址；绑非回环必须同时配 auth_token
+                                 # （非回环 + 空 token 会直接拒绝启动）
 auth_token: ""                   # 控制台 /api 鉴权令牌；空=不鉴权（仅限本机），
                                  # 也可用 AGENT_AUTH_TOKEN 注入；浏览器打开 /?token=xxx 一次即可
 
