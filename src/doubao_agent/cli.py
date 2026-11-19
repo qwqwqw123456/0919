@@ -767,6 +767,21 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         await runtime.aclose()
 
 
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def check_serve_host(host: str, auth_token: str) -> str | None:
+    """控制台监听地址准入：非回环且没有 auth_token 时拒绝启动，返回问题描述。"""
+    if (host or "").strip() in LOOPBACK_HOSTS:
+        return None
+    if (auth_token or "").strip():
+        return None
+    return (
+        f"监听 {host} 属于对外暴露，但 auth_token 为空，/api/* 将无鉴权开放；"
+        "请先配置 auth_token 或改回 127.0.0.1。"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="doubao-agent", description="豆包云电脑 Agent")
     parser.add_argument("--config", default=None, help="配置文件路径（默认 /workspace/agent.yaml）")
@@ -899,6 +914,9 @@ def main(argv: list[str] | None = None) -> int:
 
     serve_parser = sub.add_parser("serve", help="启动本地控制台")
     serve_parser.add_argument("--port", type=int, default=None)
+    serve_parser.add_argument(
+        "--host", default=None, help="监听地址（默认 127.0.0.1；绑非回环必须配置 auth_token）"
+    )
 
     daemon_parser = sub.add_parser("daemon", help="常驻守护：start / stop / status")
     daemon_parser.add_argument("action", choices=["start", "stop", "status"])
@@ -937,7 +955,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         from .server.app import create_app
 
-        uvicorn.run(create_app(cfg), host="0.0.0.0", port=args.port or cfg.port)
+        host = (args.host or cfg.serve_host or "127.0.0.1").strip()
+        problem = check_serve_host(host, cfg.auth_token)
+        if problem:
+            print(f"拒绝启动：{problem}", file=sys.stderr)
+            return 2
+        uvicorn.run(create_app(cfg), host=host, port=args.port or cfg.port)
         return 0
 
     return asyncio.run(_run_cli(args, cfg))

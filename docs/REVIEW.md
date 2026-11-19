@@ -175,3 +175,18 @@
 1. **前置阻塞**：需先有一个已加入企业组织、套餐含 CLI 权限的账号（旗舰版可生成 `trae-lt-` 令牌，或由管理员加入后走 SSO）；登录态建立后，再在当前出口网络下验证一次无头 `traecli exec --json` 能跑通真实任务。普通个人账号不满足此前置条件。
 2. **方向 A（Trae/外部 client 调我方工具）·已落地骨架（2026-11-13）**：新增 `src/doubao_agent/mcp_server.py` 与 CLI 子命令 `mcp-serve`，`--transport stdio|http`（默认 stdio），把注册表 `ToolSpec` 暴露成标准 MCP tools；`--expose read`（默认）仅对外暴露 L0 只读，`all` 放开全部风险等级（仅限本机受控场景）。实测：stdio 子进程 initialize 握手成功（serverInfo `doubao-agent 0.2.0`），`tools/list` 返回 L0 工具，`tools/call system.status` 真实返回只读指标；本地 L1/L3 默认不暴露。HTTP 传输（Streamable HTTP，端点 `/mcp`，默认绑 `127.0.0.1:8766`）经真实 uvicorn + 官方 client 通道验证：initialize / tools/list / tools/call 通过，L1 默认隐藏、直调返回 isError。挂载形态：stdio 用 `traecli mcp add <name> --command <python> --args -m doubao_agent.cli mcp-serve`；http 用 URL 直挂 `http://127.0.0.1:8766/mcp`。**已知边界**：过滤依据是 `ToolSpec.risk`；宿主 MCP manifest 把 `sandbox_execute_bash` / `browser_gui_execute_action` 名义标为 L0，但含执行能力，对外暴露前需人工复核其风险标注（既有标注偏差，本轮未改判定）；HTTP 默认仅绑回环，改绑外网需另做访问控制。
 3. 方向 B（我方调 Trae）：在我方补 exec-server JSON-RPC 客户端（或 ACP 客户端），按导出的 schema 走 initialize → 会话创建 → 任务下发 → 通知接收；这对应 G9「A2A 跨进程协议」缺口。
+
+## 十一、阶段 0 收口记录（基线 v1.63 / 0.3.0 · 2026-11-19）
+
+本轮只做"止血"，不动架构；每条都有用例兜底，全量回归 182 passed（原 177 + 新增 5）。
+
+| 项 | 处置 | 落点 | 用例 |
+| --- | --- | --- | --- |
+| P0-1 控制台裸奔 | `serve` 默认绑 `127.0.0.1`；新增 `--host` 与 `serve_host` 配置；绑非回环且 `auth_token` 为空时拒绝启动 | `cli.py` `check_serve_host`、`config.py serve_host` | `test_serve_host_requires_token_when_exposed` |
+| P0-3 主路径丢配置 | `spawn_agent` 透传 `fallback_provider` / `provider_retries` / `retry_delay` / `model_summary` | `runtime.py spawn_agent` | `test_runtime_spawn_agent_carries_fallback_and_retries` |
+| P0-4 降级不可见且会崩 | 删掉引用未赋值 `reply` 的死代码；每次 run 清空降级残留；降级写进 `answer`、`degraded` 字段、审计与事件流 | `agent.py _mark_degraded` | `test_degraded_answer_is_visible_and_survives_second_run` |
+| P0-5 鉴权错被重试 | `_status_of` 读 `exc.response.status_code`，400/401/403/404 不重试 | `agent.py _status_of` | `test_httpx_status_error_is_read_from_response` |
+| P0-6 预算进程级累计 | 每次 run 独立 `UsageMeter`，进程级只做累计汇总 | `runtime._run_meter`、`agent._record_usage` | `test_budget_is_per_run_not_process_wide` |
+| P0-2 脚本免审批 | **本轮未做**：把默认风险提到 L2 会让 guarded 下脚本通道整体不可用，必须先有"待审批队列 + 批准/拒绝"闭环；现状默认仍 L1，属已知风险 | — | — |
+
+口径回填：`docs/GAPS.md`（G6 转已落地、预算口径）、`README.md`（预算与 `serve_host`）、`assets/interface-manifest.md`（401 不重试、降级可见、`serve_host` / `provider_retry_delay`）已同步，第九节列出的偏差项除 P0-2 外均已闭合。

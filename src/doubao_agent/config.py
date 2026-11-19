@@ -81,6 +81,7 @@ class Config:
     evolution_stale_days: int = 14     # 多久没用算闲置
     evolution_archive_days: int = 30   # 多久没用进归档状态（只改状态位，不删文件）
     provider_retries: int = 1          # 端点异常重试次数；401/403 不重试，直接进降级判断
+    provider_retry_delay: float = 0.2  # 重试退避基数（秒），第 n 次重试按 n 倍放大
     provider_fallback: str = ""        # 备用 provider："" 不降级（默认）；"mock" 用内置 mock
     tool_cache_enabled: bool = True    # 幂等只读工具结果缓存开关
     tool_cache_ttl: float = 60.0       # 结果缓存存活秒数；0 或开关关闭即不缓存
@@ -107,6 +108,7 @@ class Config:
     tool_retries: int = 1              # 工具失败后按策略重试的次数（仅幂等工具）
     tool_rate_limits: dict[str, int] = field(default_factory=dict)  # 按来源的每分钟调用上限
     port: int = DEFAULT_PORT
+    serve_host: str = "127.0.0.1"      # 控制台监听地址：默认只绑回环，绑全网必须同时配 auth_token
     auth_token: str = ""               # 控制台 /api 鉴权令牌；为空表示不鉴权（仅限本机）
     model: dict[str, Any] = field(default_factory=dict)
     model_fallback: dict[str, Any] = field(default_factory=dict)  # 备用真实 provider 配置，结构同 model；空=不启用
@@ -192,6 +194,9 @@ def load_config(path: str | Path | None = None) -> Config:
                 int(evolution.get("archive_days", cfg.evolution_archive_days)),
             )
         cfg.provider_retries = max(0, int(data.get("provider_retries", cfg.provider_retries)))
+        cfg.provider_retry_delay = max(
+            0.0, float(data.get("provider_retry_delay", cfg.provider_retry_delay))
+        )
         cfg.provider_fallback = str(data.get("provider_fallback", cfg.provider_fallback) or "")
         cfg.tool_cache_enabled = bool(data.get("tool_cache_enabled", cfg.tool_cache_enabled))
         cfg.tool_cache_ttl = max(0.0, float(data.get("tool_cache_ttl", cfg.tool_cache_ttl)))
@@ -222,6 +227,7 @@ def load_config(path: str | Path | None = None) -> Config:
                 str(key): max(0, int(value)) for key, value in limits.items()
             }
         cfg.port = int(data.get("port", cfg.port))
+        cfg.serve_host = str(data.get("serve_host", cfg.serve_host) or "127.0.0.1")
         cfg.auth_token = str(data.get("auth_token", cfg.auth_token) or "")
         cfg.model = dict(data.get("model") or _default_model())
         cfg.model_fallback = dict(data.get("model_fallback") or {})

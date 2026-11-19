@@ -169,7 +169,8 @@ class Runtime:
             fallback = MockProvider(script=None)
         elif config.model_fallback:
             fallback = build_provider(config.model_fallback, bridge)
-        usage = UsageMeter(max_calls=config.max_calls, max_tokens=config.max_tokens)
+        # 进程级累计计量：只统计不设预算；预算按单次 run 单独开表（见 _run_meter）。
+        usage = UsageMeter()
         journal = ToolJournal(config.db_path)
         telemetry = Telemetry(config.db_path)
         agent = Agent(
@@ -183,13 +184,15 @@ class Runtime:
             recipes=recipes,
             record_recipes=config.record_recipes,
             planner=Planner(provider, skills, usage) if config.planning_enabled else None,
-            usage=usage,
+            usage=cls._run_meter(config),
+            total_usage=usage,
             context_limit=config.context_limit,
             cancel_event=cancel_event,
             working=working,
             repair_rounds=config.repair_rounds,
             fallback_provider=fallback,
             provider_retries=config.provider_retries,
+            retry_delay=config.provider_retry_delay,
             model_summary=config.context_model_summary,
             journal=journal,
             telemetry=telemetry,
@@ -238,8 +241,10 @@ class Runtime:
     def spawn_agent(self) -> Agent:
         """创建一个独立 Agent 实例用于并行协同。
 
-        共享工具注册表、模型、权限策略、审计、记忆、配方与计量，仅取消信号独立，
-        因此子任务并发执行互不干扰，且成本计入同一份计量。
+        共享工具注册表、模型、权限策略、审计、记忆、配方与进程级计量，仅取消信号与
+        本次运行的预算表独立，因此子任务并发执行互不干扰，成本计入进程级汇总。
+        端点兜底配置（备用 provider / 重试 / 摘要）必须显式透传，否则配置里写的
+        兜底策略在正常跑任务时不生效。
         """
         return Agent(
             registry=self.registry,
@@ -252,15 +257,25 @@ class Runtime:
             recipes=self.recipes,
             record_recipes=self.config.record_recipes,
             planner=self.agent.planner,
-            usage=self.usage,
+            usage=self._run_meter(self.config),
+            total_usage=self.usage,
             context_limit=self.config.context_limit,
             cancel_event=asyncio.Event(),
             working=self.working,
             repair_rounds=self.config.repair_rounds,
+            fallback_provider=self.agent.fallback_provider,
+            provider_retries=self.agent.provider_retries,
+            retry_delay=self.agent.retry_delay,
+            model_summary=self.agent.model_summary,
             journal=self.journal,
             telemetry=self.telemetry,
             tool_retries=self.config.tool_retries,
         )
+
+    @staticmethod
+    def _run_meter(config: Config) -> UsageMeter:
+        """单次运行的预算表：预算按每次 run 独立计，进程级汇总另记（见 self.usage）。"""
+        return UsageMeter(max_calls=config.max_calls, max_tokens=config.max_tokens)
 
     def running_sessions(self) -> list[str]:
         return sorted(self._runs)
