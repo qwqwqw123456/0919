@@ -11,7 +11,9 @@ script_risk: L1
 script_max_cpu: 0
 record_recipes: true
 planning:
-  enabled: true
+  # 默认关：开启后每个任务先串一次模型做计划，简单任务纯多一次往返，
+  # 且计划畸形时会被判 incomplete。多步重活临时改回 true 再跑。
+  enabled: false
 skills_dir: /workspace/skills
 context_limit: 40
 scheduler_enabled: true
