@@ -1,6 +1,7 @@
-workspace: /workspace
-runs_dir: /workspace/runs
-db_path: /workspace/.agent/agent.db
+# 状态落持久层：/workspace 每次容器重启（平台更新）会被清空，不可放运行态。
+workspace: /home/user/agent-state
+runs_dir: /home/user/agent-state/runs
+db_path: /home/user/agent-state/.agent/agent.db
 permission_mode: guarded
 auto_approve:
   - tool: send_message
@@ -14,7 +15,7 @@ planning:
   # 默认关：开启后每个任务先串一次模型做计划，简单任务纯多一次往返，
   # 且计划畸形时会被判 incomplete。多步重活临时改回 true 再跑。
   enabled: false
-skills_dir: /workspace/skills
+skills_dir: /home/user/agent-state/skills
 context_limit: 40
 scheduler_enabled: true
 scheduler_interval: 30
