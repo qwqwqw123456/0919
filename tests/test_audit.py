@@ -28,7 +28,9 @@ def test_audit_redacts_secrets(tmp_path) -> None:
     assert arguments["target_id"] == "user-1"
     # max_tokens 不是凭据，不能被误伤
     assert arguments["max_tokens"] == 5
-    assert "abc" not in json.dumps(row)
+    # 不能直接断言 "abc" 不出现在整条 JSON：摘要/哈希是十六进制，本身就可能撞出 abc 子串
+    assert row["arguments"]["token"] != "abc"
+    assert "k-123" not in json.dumps(row)
 
 
 def test_audit_verify_passes_and_detects_tampering(tmp_path) -> None:
