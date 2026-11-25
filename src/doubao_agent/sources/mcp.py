@@ -18,6 +18,12 @@ from .base import SourceError
 # 云电脑的能力入口是标准 MCP（平台侧 8091 端口），启动时可自动探测。
 DEFAULT_HOST_MCP_URL = "http://127.0.0.1:8091/mcp"
 
+# stdio 子进程只继承必要变量，避免把宿主的 API key / token 一并漏给第三方 server。
+_BASE_ENV_KEYS = (
+    "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    "TMPDIR", "TEMP", "TMP", "TZ", "PYTHONPATH", "PYTHONIOENCODING",
+)
+
 
 def _tcp_reachable(host: str, port: int, timeout: float) -> bool:
     try:
@@ -71,21 +77,34 @@ class MCPSource:
         self._stack: AsyncExitStack | None = None
         self._session: Any = None
         self._failed: str | None = None
+        self._failed_at: float = 0.0
+        self._fail_count: int = 0
 
     async def _ensure(self) -> Any:
         if self._session is not None:
             return self._session
         if self._failed is not None:
-            raise SourceError(self._failed)
+            cooling = time.monotonic() - self._failed_at < max(0.0, self.cfg.retry_cooldown)
+            if cooling:
+                raise SourceError(self._failed)
+            # 冷却结束：允许重连一次，失败再重新计时，不再永久锁死
+            self._failed = None
 
         await self._precheck()
         try:
             session = await self._connect()
         except BaseException as exc:  # noqa: BLE001 - 含 anyio 取消域异常，一律判不可用
-            self._failed = f"MCP {self.name} 初始化失败：{type(exc).__name__}: {exc}"
+            self._fail_count += 1
+            self._failed_at = time.monotonic()
+            self._failed = (
+                f"MCP {self.name} 初始化失败（第 {self._fail_count} 次）："
+                f"{type(exc).__name__}: {exc}"
+            )
             await self._discard()
             raise SourceError(self._failed) from exc
         self._session = session
+        self._failed = None
+        self._fail_count = 0
         return session
 
     async def _precheck(self) -> None:
@@ -102,6 +121,14 @@ class MCPSource:
         reachable = await asyncio.to_thread(_tcp_reachable, host, port, 1.0)
         if not reachable:
             raise SourceError(f"MCP {self.name} 不可达：{host}:{port}")
+
+    def _stdio_env(self) -> dict[str, str]:
+        """默认最小环境；显式 inherit_env 时才全量继承。cfg.env 始终覆盖。"""
+        base = dict(os.environ) if self.cfg.inherit_env else {
+            key: os.environ[key] for key in _BASE_ENV_KEYS if key in os.environ
+        }
+        base.update(self.cfg.env)
+        return base
 
     async def _discard(self) -> None:
         stack, self._stack = self._stack, None
@@ -130,7 +157,7 @@ class MCPSource:
             params = StdioServerParameters(
                 command=self.cfg.command,
                 args=self.cfg.args,
-                env={**os.environ, **self.cfg.env} if self.cfg.env else None,
+                env=self._stdio_env(),
             )
             read, write = await self._stack.enter_async_context(stdio_client(params))
         elif transport == "sse":

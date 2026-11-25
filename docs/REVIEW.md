@@ -67,10 +67,12 @@
 | P1-3 | **异常时会话不收尾**：`run()` finally 只结工作记忆，没 `sessions.finish("failed")`，CLI/并行路径会话悬挂 running；只有服务端外层兜底 | `agent.py:429-436`；兜底见 `app.py:271,296,327` |
 | ↑ | **2026-11-25 进展**：`Agent.run` finally 补 `_close_dangling_session`，异常逃逸时把仍是 running 的会话改 failed；实测 provider 抛异常后会话状态 failed、running 列表为空 | `agent.py` |
 | P1-4 | **审计链偏弱**：哈希截断 16 hex（64bit）；追加读尾+写无文件锁，`_last` 内存缓存跨进程会 stale 断链；脱敏只按字段名，`code/command/content` 内嵌的 Bearer/api_key= 不打码；无 seq；长文件全量读入再切片 | `audit.py:85`、`audit.py:88-91`、`audit.py:27-40`、`audit.py:93-106` |
-| ↑ | **2026-11-25 进展**：跨进程 `flock` + 完整 64 hex 摘要已落地，校验兼容历史 16 hex；字段名脱敏与无 seq 仍未改 | `audit.py` |
+| ↑ | **2026-11-25 进展**：跨进程 `flock` + 完整 64 hex 摘要已落地，校验兼容历史 16 hex；字段值模式打码与 seq 随后也已补齐 | `audit.py`
 | P1-5 | **Planner/Coordinator/摘要绕过统一模型层**：直连 `provider.complete`，没重试/降级/遥测；decompose docstring 承诺"失败兜底单任务"但无 try/except；摘要调用不计 usage | `planner.py:134-141`、`coordinator.py:101-107`、`coordinator.py:218`、`agent.py:84-102` |
 | P1-6 | **MCP 一次失败永久锁存**：`_failed` 后不再重连、无退避，health 也不重置；stdio 子进程继承全量环境变量（含密钥） | `mcp.py:73-79`、`mcp.py:133` |
+| ↑ | **2026-11-25 进展**：`_failed` 改冷却重连（默认 60s，`retry_cooldown` 可配），stdio 子进程改最小环境（`inherit_env` 显式才全量继承） | `sources/mcp.py` |
 | P1-7 | **技能通道取消/进程组回收缺失**：无 `start_new_session`，超时只 kill 直进程、子进程泄漏；不读 cancel_event。对照 script 通道三者齐全，能力不一致 | `skill.py:105-128`；对照 `script.py:121-134,181` |
+| ↑ | **2026-11-25 进展**：技能通道补 `start_new_session` + `killpg` 整组回收 + 会话级取消；实测超时后孙子进程不再落盘 | `sources/skill.py` |
 | P1-8 | **缓存/限流**：先扣限流再查缓存（命中也耗配额）；FIFO 淘汰非 LRU；缓存无 session/租户隔离；写操作不失效读缓存；后缀名二义性直接返回 unknown | `registry.py:88-99`、`registry.py:151-155`、`registry.py:80-81` |
 | P1-9 | **HTTP API body 混入 query**：有 body 的端点，body 字典把未分类的 query 键也带进去 | `http_api.py:175-189` |
 | P1-10 | **配方/回放**：失败步骤仍录制并回放；配方按次 INSERT 不去重；journal preview 截断 2000 字符且无 truncated 标记，回放返回静默截断内容 | `agent.py:570-573`、`recipe.py:37`、`journal.py:28,93` |

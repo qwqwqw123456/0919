@@ -54,6 +54,8 @@ class MCPServerConfig:
     args: list[str] = field(default_factory=list)
     url: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    inherit_env: bool = False          # stdio 子进程默认只拿最小环境，不继承全量（含密钥）
+    retry_cooldown: float = 60.0       # 初始化失败后的冷却时间，冷却结束允许重连
 
 
 @dataclass
@@ -154,6 +156,8 @@ def _parse_mcp(items: list[dict[str, Any]]) -> list[MCPServerConfig]:
                 args=list(item.get("args", [])),
                 url=item.get("url"),
                 env=dict(item.get("env", {})),
+                inherit_env=bool(item.get("inherit_env", False)),
+                retry_cooldown=max(0.0, float(item.get("retry_cooldown", 60.0))),
             )
         )
     return out

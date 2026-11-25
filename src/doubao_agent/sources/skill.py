@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -25,8 +26,9 @@ class SkillSource:
 
     name = "skill"
 
-    def __init__(self, manager: SkillManager) -> None:
+    def __init__(self, manager: SkillManager, cancel_event: asyncio.Event | None = None) -> None:
         self.manager = manager
+        self.cancel_event = cancel_event
 
     async def list_tools(self) -> list[ToolSpec]:
         specs = [
@@ -83,6 +85,22 @@ class SkillSource:
         self.manager._meter(skill.name, "use")
         return result
 
+    @staticmethod
+    async def _kill_tree(process: asyncio.subprocess.Process) -> None:
+        """回收整个进程组，避免技能脚本拉起的子进程变成孤儿。"""
+        if process.returncode is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+        try:
+            await process.wait()
+        except ProcessLookupError:
+            pass
+
     async def _run(self, skill: Skill, call: ToolCall) -> ToolResult:
         started = time.perf_counter()
         root = skill.directory.resolve()
@@ -101,6 +119,16 @@ class SkillSource:
         env["SKILL_NAME"] = skill.name
         env["SKILL_DIR"] = str(skill.directory)
 
+        # 会话级取消优先于源级取消，互不干扰（与脚本通道同口径）。
+        cancel_event = call.cancel_event or self.cancel_event
+        if cancel_event is not None and cancel_event.is_set():
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                error="cancelled",
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+            )
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -109,6 +137,7 @@ class SkillSource:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                start_new_session=True,
             )
         except Exception as exc:  # noqa: BLE001
             return ToolResult(
@@ -119,19 +148,42 @@ class SkillSource:
             )
 
         payload = json.dumps(call.arguments or {}, ensure_ascii=False).encode("utf-8")
+        communicate = asyncio.ensure_future(process.communicate(payload))
+        cancel_wait: asyncio.Future | None = None
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(payload), timeout=skill.timeout
-            )
+            if cancel_event is None:
+                stdout, stderr = await asyncio.wait_for(communicate, timeout=skill.timeout)
+            else:
+                cancel_wait = asyncio.ensure_future(cancel_event.wait())
+                done, _ = await asyncio.wait(
+                    {communicate, cancel_wait},
+                    timeout=skill.timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    raise asyncio.TimeoutError
+                if cancel_wait in done and not communicate.done():
+                    await self._kill_tree(process)
+                    communicate.cancel()
+                    return ToolResult(
+                        call_id=call.call_id,
+                        ok=False,
+                        error="cancelled",
+                        elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                stdout, stderr = communicate.result()
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            await self._kill_tree(process)
+            communicate.cancel()
             return ToolResult(
                 call_id=call.call_id,
                 ok=False,
                 error=f"timeout after {skill.timeout:g}s",
                 elapsed_ms=int((time.perf_counter() - started) * 1000),
             )
+        finally:
+            if cancel_wait is not None:
+                cancel_wait.cancel()
 
         out = stdout.decode("utf-8", errors="replace")
         err = stderr.decode("utf-8", errors="replace")

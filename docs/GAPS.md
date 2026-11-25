@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 53 个 Python 文件 / 9652 行 / 39 测试文件 / 221 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 53 个 Python 文件 / 9781 行 / 42 测试文件 / 231 passed，分支 `feat/evolution-layer`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
@@ -10,6 +10,7 @@
 | 三层记忆 + 检索 | `working_state` / `lessons·observations·deviations` / `documents·chunks`；知识库同步+异步检索，向量失败退回关键词混合 |
 | 上下文压缩 | `core/agent.py` `_trim_messages`：保留 system + 最近消息，对齐 user 边界；被裁早期 user 要点并入 system 注记 |
 | 调度 / 并行 / 续跑 / 重放 | `schedules` cron；`parallel` 子任务；检查点 + `resume`；配方 `replay` 零模型重放 |
+| 权限与审计（续） | 审计记录带 `seq`（与哈希一起入链，篡改可判）；`code/command/content` 内嵌 Bearer/sk-/AKIA/gh*_/JWT 与 `key=value` 值模式打码；MCP stdio 子进程默认最小环境，`inherit_env` 显式才继承全量；Skill 通道与脚本通道同口径（进程组回收 + 会话取消） |
 | 权限与审计 | 风险 L0–L3；`auto / guarded / manual`；审计追加式哈希链 JSONL，凭据按字段名脱敏（`code/command/content` 内嵌值不打码；值模式脱敏仅长期记忆出口）；哈希链已用完整 sha256（64 hex）并加 `flock` 跨进程锁串行化追加，校验兼容历史 16 hex 旧链 |
 | 预算与修正 | `max_calls` / `max_tokens` / `repair_rounds`；每次 run 独立 `UsageMeter`（`Runtime._run_meter`），进程级只做累计汇总不设预算，超限以 `incomplete` 收尾 |
 | 注入防护 | 工具/网页/文件输出用不可信头脚包裹，其中指令不得执行（`_UNTRUSTED_HEADER/FOOTER`） |
@@ -68,4 +69,4 @@
 
 ## 4. 建议优先级
 
-运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.66 / 0.3.0，221 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。
+运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.67 / 0.3.0，231 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。

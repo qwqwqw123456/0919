@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,40 @@ _SECRET_KEYS = {
 }
 _SECRET_SUFFIXES = ("_token", "_secret", "_password", "_api_key", "_apikey", "_private_key")
 
+# 字段名兜不住的情况（密钥写在 code/command/content 正文里）：按值模式打码
+_VALUE_PATTERNS = (
+    (re.compile(r"(?i)(bearer)\s+[A-Za-z0-9._\-+/=]{8,}"), r"\1 ***"),
+    (re.compile(r"(?i)\b(sk|rk|pk)-[A-Za-z0-9]{8,}"), "sk-***"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AKIA***"),
+    (re.compile(r"\bgh[pous]_[A-Za-z0-9]{16,}\b"), "gh*_***"),
+    (re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{4,}"), "jwt-***"),
+    (
+        re.compile(
+            r"(?i)\b(api[_-]?key|access[_-]?key|secret|token|password|passwd|authorization)"
+            r"""(\s*[=:]\s*)(["']?)([^\s,;"'}]{4,})"""
+        ),
+        r"\1\2\3***",
+    ),
+)
+
+
+_PLACEHOLDERS = {"***", "bearer", "basic", "token", "undefined", "null"}
+
+
+def _kv_repl(match: re.Match[str]) -> str:
+    """key=value 里只打码真正的值；Bearer/Basic 这类前缀留给上一条规则处理。"""
+    value = match.group(4)
+    if value.strip("\"'").lower() in _PLACEHOLDERS:
+        return match.group(0)
+    return f"{match.group(1)}{match.group(2)}{match.group(3)}***"
+
+
+def _scrub_text(text: str) -> str:
+    """把字符串里内嵌的凭据模式替换成 ***；非字符串原样返回。"""
+    for pattern, repl in _VALUE_PATTERNS[:-1]:
+        text = pattern.sub(repl, text)
+    return _VALUE_PATTERNS[-1][0].sub(_kv_repl, text)
+
 # 链上允许的摘要长度：64 = 完整 sha256（新记录），16 = 历史截断记录（兼容旧链）
 _HASH_LENGTHS = (64, 16)
 
@@ -46,6 +81,8 @@ def redact(value: Any) -> Any:
         return out
     if isinstance(value, list):
         return [redact(item) for item in value]
+    if isinstance(value, str):
+        return _scrub_text(value)
     return value
 
 
@@ -78,24 +115,25 @@ class AuditLog:
     def _lock_path(self, path: Path) -> Path:
         return path.with_name(path.name + ".lock")
 
-    def _tail_hash(self, path: Path) -> str:
-        """读文件最后一条的 hash；文件不存在/为空返回 genesis。"""
+    def _tail_state(self, path: Path) -> tuple[str, int]:
+        """读文件最后一条的 (hash, seq)；文件不存在/为空返回 ("genesis", 0)。"""
         if not path.exists():
-            return "genesis"
+            return "genesis", 0
         try:
             size = path.stat().st_size
         except OSError:
             return "genesis"
         if size == 0:
-            return "genesis"
+            return "genesis", 0
         with path.open("rb") as handle:
             handle.seek(max(0, size - 4096))
             chunk = handle.read()
         lines = [line for line in chunk.splitlines() if line.strip()]
         while lines:
             try:
-                return json.loads(lines[-1]).get("hash", "genesis")
-            except json.JSONDecodeError:
+                row = json.loads(lines[-1])
+                return row.get("hash", "genesis"), int(row.get("seq") or 0)
+            except (json.JSONDecodeError, TypeError, ValueError):
                 # 定位点切断了首行；丢掉这半行继续往前找
                 lines = lines[1:]
         # 单条记录超过 4KB 时回退整文件读取
@@ -105,11 +143,12 @@ class AuditLog:
                 if line.strip():
                     last = line
         if not last:
-            return "genesis"
+            return "genesis", 0
         try:
-            return json.loads(last).get("hash", "genesis")
-        except json.JSONDecodeError:
-            return "genesis"
+            row = json.loads(last)
+            return row.get("hash", "genesis"), int(row.get("seq") or 0)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return "genesis", 0
 
     def append(self, session_id: str, event: str, **payload: Any) -> dict[str, Any]:
         path = self._path(session_id)
@@ -119,7 +158,7 @@ class AuditLog:
             if fcntl is not None:
                 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
             try:
-                prev = self._tail_hash(path)
+                prev, prev_seq = self._tail_state(path)
                 record: dict[str, Any] = redact(
                     {
                         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -128,7 +167,8 @@ class AuditLog:
                         **payload,
                     }
                 )
-                digest = _digest(prev, record, 64)
+                record["seq"] = prev_seq + 1
+                digest = _digest(prev, record, 64)  # 与 verify 同口径：摘要不含 prev/hash
                 record["prev"] = prev
                 record["hash"] = digest
                 with path.open("a", encoding="utf-8") as handle:
@@ -181,6 +221,7 @@ class AuditLog:
         if not path.exists():
             return True, 0
         prev = "genesis"
+        seq = 0
         count = 0
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -197,6 +238,11 @@ class AuditLog:
                 stored_hash = record.pop("hash", None)
                 if not _hash_ok(stored_hash) or not isinstance(stored_prev, str):
                     return False, count
+                if "seq" in record:
+                    stored_seq = record.get("seq")
+                    if not isinstance(stored_seq, int) or stored_seq != seq + 1:
+                        return False, count
+                    seq = stored_seq
                 expected = _digest(prev, record, len(stored_hash))
                 if stored_prev != prev or stored_hash != expected:
                     return False, count
