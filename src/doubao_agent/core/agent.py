@@ -275,6 +275,7 @@ class Agent:
         telemetry: Telemetry | None = None,
         tool_retries: int = 1,
         total_usage: UsageMeter | None = None,
+        profile: Any = None,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -289,6 +290,7 @@ class Agent:
         self.usage = usage or UsageMeter()
         # 进程级累计计量（只做统计，不设预算），用于控制台 /api/metrics 汇总。
         self.total_usage = total_usage
+        self.profile = profile
         self.context_limit = context_limit
         self.working = working
         self.repair_rounds = repair_rounds
@@ -392,6 +394,9 @@ class Agent:
         self._recalled_ids = [item["id"] for item in preferences + recalled]
 
         sections: list[str] = []
+        profile_text = self.profile.context_text() if self.profile is not None else ""
+        if profile_text:
+            sections.append(profile_text)
         working_text = self.working.context_text() if self.working is not None else ""
         if working_text:
             sections.append(working_text)

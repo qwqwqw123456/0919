@@ -113,6 +113,7 @@ class Config:
     model: dict[str, Any] = field(default_factory=dict)
     model_fallback: dict[str, Any] = field(default_factory=dict)  # 备用真实 provider 配置，结构同 model；空=不启用
     bridge: dict[str, Any] = field(default_factory=dict)
+    outbound: dict[str, Any] = field(default_factory=dict)  # 出站通道：console / feishu / smtp
     embedding: dict[str, Any] = field(default_factory=dict)  # 宿主 embedding 能力，默认自动探测
     auto_approve: list[dict[str, Any]] = field(default_factory=list)  # 规则预授权，替代人工审批
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
@@ -213,6 +214,7 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.watch_interval = max(2.0, float(data.get("watch_interval", cfg.watch_interval)))
         cfg.watch_task = str(data.get("watch_task", cfg.watch_task) or "")
         cfg.watch_suffixes = [str(x) for x in (data.get("watch_suffixes") or [])]
+        cfg.outbound = dict(data.get("outbound") or {})
         planning = data.get("planning") or {}
         if isinstance(planning, dict):
             cfg.planning_enabled = bool(planning.get("enabled", cfg.planning_enabled))

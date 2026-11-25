@@ -16,7 +16,9 @@ from .core.limits import RateLimiter
 from .core.longterm import LongTermMemory
 from .core.memory import MemoryStore
 from .core.permissions import Approver, PermissionPolicy
+from .core.outbound import Notifier, config_from_dict as outbound_config
 from .core.planner import Planner
+from .core.profile import ProfileStore
 from .core.recipe import RecipeStore
 from .core.scheduler import ScheduleStore
 from .core.session import SessionStore
@@ -56,6 +58,8 @@ class Runtime:
     skills: SkillManager
     usage: UsageMeter
     scheduler: ScheduleStore
+    profile: ProfileStore
+    notifier: Notifier
     journal: ToolJournal
     telemetry: Telemetry
     evolution: EvolutionStore | None = None
@@ -158,6 +162,8 @@ class Runtime:
         longterm = LongTermMemory(config.db_path)
         recipes = RecipeStore(config.db_path)
         scheduler = ScheduleStore(config.db_path)
+        profile = ProfileStore(config.db_path)
+        notifier = Notifier(outbound_config(config.outbound), config.db_path)
         audit = AuditLog(config.runs_dir)
         provider = build_provider(config.model, bridge)
         # 备用 provider：默认不降级（不静默换模型）。显式 provider_fallback=mock 用内置 mock；
@@ -212,6 +218,8 @@ class Runtime:
             skills=skills,
             usage=usage,
             scheduler=scheduler,
+            profile=profile,
+            notifier=notifier,
             journal=journal,
             telemetry=telemetry,
             evolution=evolution,
@@ -227,6 +235,8 @@ class Runtime:
         self.knowledge.close()
         self.recipes.close()
         self.scheduler.close()
+        self.profile.close()
+        self.notifier.close()
         self.journal.close()
         self.telemetry.close()
 
@@ -270,6 +280,7 @@ class Runtime:
             journal=self.journal,
             telemetry=self.telemetry,
             tool_retries=self.config.tool_retries,
+            profile=self.profile,
         )
 
     @staticmethod

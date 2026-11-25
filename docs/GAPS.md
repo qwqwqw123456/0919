@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 48 个 Python 文件 / 8371 行 / 30 测试文件 / 177 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 51 个 Python 文件 / 9282 行 / 35 测试文件 / 202 passed，分支 `feat/evolution-layer`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
@@ -47,6 +47,14 @@
 | G9 | **跨 Agent 协议** | 仅本地 `parallel` 进程内拆分；无 A2A 协议、跨进程协作与共享记忆契约 | 多 Agent 间有统一消息/结果契约，可跨进程编排并回写共享记忆 |
 | G10 | **桌面 GUI 视觉后端** | 浏览器 9 + 桌面 8 兜底工具目录在；执行依赖宿主桥，沙箱内真实截图/键鼠后端未适配 | 经宿主通道完成一次非 Web 客户端的截图、定位、点击；协议不符时有明确降级提示 |
 
+## 2.5 本轮补的三处（A/B/C，已落地）
+
+| # | 原先缺口 | 落地证据 | 验收 |
+| --- | --- | --- | --- |
+| A | 无「一句话 → 任务卡」入口，只能手写 cron | `core/intake.py`：`parse_task` 把中文原话拆成 对象/条件/频率/到期/动作/确认级/原话，识别不到写 `warnings` 不编造；CLI `intake [--save]`，`--save` 直接 `scheduler.add` 并把任务卡写进描述 | `tests/test_intake.py` 8 条；实跑「盯着声音玩具北京场开票，有票就提醒我」「每天下午4点提醒我发最终版资料」「帮订明天晚上7点4人的餐厅」均按预期出卡 |
+| B | 结果只留在会话里，Agent 不能主动推给人 | `core/outbound.py`：`Notifier` 出口统一 脱敏 → 去重（`dedupe_hours`）→ 滚动 24h 日上限（`daily_limit`）→ 发送 → 记账；`outbox` 表留 status/error；transport 支持 console / 飞书 webhook / SMTP，配置走 `agent.yaml: outbound` 或环境变量 | `tests/test_outbound.py` 6 条；实跑重复内容判 `duplicate`、第 4 条判 `limited`、失败留痕 |
+| C | 画像散在记忆里，无键值、无来源/置信/冲突历史、不能停用 | `core/profile.py`：`profile_entries` + `profile_history` 两表，`set/get/list/forget/history/context_text`；改值保留旧值进历史，敏感键（password/token/secret/key/密码/密钥/凭证）直接拒写；`context_text` 一行注入 system prompt 且受字符预算约束 | `tests/test_profile.py` 6 条；实跑 set→改口→history 留「老板 → 豆神」→ forget 后不再注入 |
+
 ## 3. 平台侧底座（运行时不承担，需向宿主确认归属）
 
 | # | 事项 | 说明 |
@@ -59,4 +67,4 @@
 
 ## 4. 建议优先级
 
-运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.63 / 0.3.0，182 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。
+运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.64 / 0.3.0，202 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。

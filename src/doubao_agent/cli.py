@@ -16,7 +16,10 @@ from .config import Config, load_config
 from .core.audit import AuditLog
 from .core.evolution import EvolutionStore
 from .core.recipe import RecipeStore
+from .core.intake import explain as explain_intake, parse_task
 from .core.memory import KINDS as MEMORY_KINDS
+from .core.outbound import redact
+from .core.profile import ProfileStore
 from .mcp_server import serve, serve_http
 from .runtime import Runtime
 from .types import ToolCall, ToolSpec
@@ -313,6 +316,117 @@ def _memory_command(memory, args: argparse.Namespace) -> int:
     for kind, count in stats["kinds"].items():
         print(f"  {kind}\t{count}")
     return 0
+
+
+def _intake_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    text = " ".join(args.text).strip()
+    if not text:
+        print("用法: intake \"盯着某场演出开票，有票就提醒我\" [--save]", file=sys.stderr)
+        return 2
+    try:
+        spec = parse_task(text)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(explain_intake(spec))
+    if not args.save:
+        print("\n（未登记；加 --save 就写成定时任务）")
+        return 0
+    schedule_id = runtime.scheduler.add(spec.title, spec.cron, spec.describe())
+    row = runtime.scheduler.get(schedule_id)
+    print(f"\n已登记跟进 #{schedule_id}，下次执行 {_fmt_time(row['next_run'] if row else None)}")
+    if spec.confirm_level >= 2:
+        print("确认级 2：执行前会先找你要一次明确同意，不会直接动手")
+    return 0
+
+
+def _profile_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    store = ProfileStore(runtime.config.db_path)
+    try:
+        if args.action == "set":
+            if len(args.args) < 2:
+                print("用法: profile set <键> <值> [--source 来源] [--confidence 0~1]", file=sys.stderr)
+                return 2
+            try:
+                entry = store.set(
+                    args.args[0],
+                    " ".join(args.args[1:]),
+                    source=args.source,
+                    confidence=args.confidence,
+                    note=args.note or "",
+                )
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+            print(f"已记住：{entry['key']}={entry['value']}")
+            return 0
+
+        if args.action == "get":
+            if not args.args:
+                print("用法: profile get <键>", file=sys.stderr)
+                return 2
+            entry = store.get(args.args[0])
+            print(
+                f"{entry['key']}={entry['value']}（来源 {entry['source']}，置信 {entry['confidence']}，"
+                f"{_fmt_time(entry['updated_at'])}）"
+                if entry
+                else "没有这条"
+            )
+            return 0
+
+        if args.action in ("list", "show"):
+            if args.action == "show":
+                print(store.context_text() or "还没有画像，用 `profile set 称呼 老板` 开始")
+                return 0
+            rows = store.list("all")
+            if not rows:
+                print("还没有画像")
+                return 0
+            for row in rows:
+                print(
+                    f"{row['status']}\t{row['key']}={row['value']}\t来源={row['source']}\t"
+                    f"置信={row['confidence']}\t更新={_fmt_time(row['updated_at'])}"
+                )
+            return 0
+
+        if args.action == "forget":
+            if not args.args:
+                print("用法: profile forget <键>", file=sys.stderr)
+                return 2
+            ok = store.forget(args.args[0])
+            print("已停用，不再注入" if ok else "没有这条")
+            return 0 if ok else 1
+
+        if args.action == "history":
+            if not args.args:
+                print("用法: profile history <键>", file=sys.stderr)
+                return 2
+            rows = store.history(args.args[0])
+            if not rows:
+                print("没有变更记录")
+                return 0
+            for row in rows:
+                print(f"{_fmt_time(row['changed_at'])}\t{row['old_value']} → {row['new_value']}")
+            return 0
+
+        print(f"未知动作: {args.action}", file=sys.stderr)
+        return 2
+    finally:
+        store.close()
+
+
+def _notify_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    text = " ".join(args.text).strip()
+    if not text:
+        print("用法: notify \"要推给用户的内容\" [--fingerprint 去重键]", file=sys.stderr)
+        return 2
+    result = runtime.notifier.send(text, fingerprint=args.fingerprint)
+    if result["ok"]:
+        print(f"已发送（{runtime.notifier.config.channel}）")
+        return 0
+    print(f"未发送：{result['status']} / {result.get('reason', '')}", file=sys.stderr)
+    print(f"[脱敏后内容] {redact(text)}")
+    return 1
 
 
 def _fmt_time(timestamp: float | None) -> str:
@@ -694,6 +808,15 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "schedule":
             return await _schedule_command(runtime, args)
 
+        if args.cmd == "intake":
+            return _intake_command(runtime, args)
+
+        if args.cmd == "profile":
+            return _profile_command(runtime, args)
+
+        if args.cmd == "notify":
+            return _notify_command(runtime, args)
+
         if args.cmd == "knowledge":
             return _knowledge_command(runtime, args)
 
@@ -859,6 +982,21 @@ def main(argv: list[str] | None = None) -> int:
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "enable", "disable", "run"])
     schedule_parser.add_argument("args", nargs="*", default=[])
     schedule_parser.add_argument("--name", default=None, help="任务名称（仅 add）")
+
+    intake_parser = sub.add_parser("intake", help="人话入口：一句话 → 任务卡（--save 直接登记）")
+    intake_parser.add_argument("text", nargs="*", default=[], help="一句话交代")
+    intake_parser.add_argument("--save", action="store_true", help="直接登记成定时任务")
+
+    profile_parser = sub.add_parser("profile", help="关于你：键值画像 set/get/list/show/forget/history")
+    profile_parser.add_argument("action", choices=["set", "get", "list", "show", "forget", "history"])
+    profile_parser.add_argument("args", nargs="*", default=[])
+    profile_parser.add_argument("--source", default="user", help="来源：user / 推断 / 导入")
+    profile_parser.add_argument("--confidence", type=float, default=1.0, help="置信 0~1")
+    profile_parser.add_argument("--note", default="", help="备注")
+
+    notify_parser = sub.add_parser("notify", help="出站通道：把一条消息推给用户")
+    notify_parser.add_argument("text", nargs="*", default=[])
+    notify_parser.add_argument("--fingerprint", default=None, help="去重键；默认按内容哈希")
 
     knowledge_parser = sub.add_parser(
         "knowledge", help="知识库：文档导入 / 检索 / 删除 / 统计 / 七域索引"
