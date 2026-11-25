@@ -13,11 +13,18 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
+from ..core.a2a import A2AHandler
 from ..core.watcher import _run_watcher
 from ..runtime import Runtime
 from ..types import ToolSpec
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _base_url(config: Config) -> str:
+    host = (config.serve_host or "127.0.0.1").strip() or "127.0.0.1"
+    port = int(getattr(config, "port", 0) or 8765)
+    return f"http://{host}:{port}"
 
 
 def _tool_dict(spec: ToolSpec) -> dict[str, Any]:
@@ -122,6 +129,7 @@ def create_app(config: Config) -> FastAPI:
     async def lifespan(app: FastAPI):
         runtime = await Runtime.build(config)
         state["runtime"] = runtime
+        state["a2a"] = A2AHandler(runtime, _base_url(config))
         scheduler_task = None
         watcher_task = None
         if runtime.config.scheduler_enabled:
@@ -142,6 +150,20 @@ def create_app(config: Config) -> FastAPI:
     app = FastAPI(title="Doubao Agent Console", lifespan=lifespan)
 
     auth_token = (config.auth_token or "").strip()
+
+    def _authorized(request: Request) -> bool:
+        """与 /api 中间件同一套凭据口径，供 A2A 端点复用。"""
+        if not auth_token:
+            return True
+        bearer = request.headers.get("authorization", "")
+        if bearer.lower().startswith("bearer "):
+            bearer = bearer[7:]
+        provided = (
+            request.headers.get("x-agent-token")
+            or bearer
+            or request.query_params.get("token", "")
+        )
+        return bool(provided) and hmac.compare_digest(provided, auth_token)
 
     @app.middleware("http")
     async def require_token(request, call_next):
@@ -409,6 +431,41 @@ def create_app(config: Config) -> FastAPI:
         _spawn(runtime.start_run(schedule["task"], on_event=bus.publish))
         runtime.scheduler.mark_ran(schedule_id, now=time.time())
         return {"id": schedule_id, "status": "started"}
+
+    @app.get("/.well-known/agent-card.json")
+    @app.get("/agent.json")
+    async def agent_card() -> JSONResponse:
+        """A2A Agent Card：公开可读，只暴露名称/能力清单，不含令牌与路径。"""
+        return JSONResponse(state["a2a"].card())
+
+    @app.get("/a2a")
+    async def a2a_card() -> JSONResponse:
+        return JSONResponse(state["a2a"].card())
+
+    @app.post("/a2a")
+    async def a2a_endpoint(request: Request):
+        """A2A JSON-RPC 入口；``message/stream`` 走 SSE，其余返回单个 JSON-RPC 响应。"""
+        if not _authorized(request):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        try:
+            payload = json.loads(await request.body() or b"{}")
+        except json.JSONDecodeError:
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": "invalid JSON"},
+                }
+            )
+        handler = state["a2a"]
+        method = str((payload or {}).get("method") or "") if isinstance(payload, dict) else ""
+        if method == "message/stream":
+            async def generator():
+                async for item in handler.stream(payload):
+                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
+            return StreamingResponse(generator(), media_type="text/event-stream")
+        return JSONResponse(await handler.handle(payload))
 
     @app.get("/")
     async def index() -> FileResponse:

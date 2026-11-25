@@ -77,6 +77,7 @@ src/doubao_agent/
 │   ├── secrets.py      # 凭据兜底：env → vault-file → keyring → vault-cmd → 加密库
 │   ├── db.py           # SQLite 统一入口：WAL + busy_timeout + synchronous
 │   ├── multimodal.py   # 附件入口：图片/视频抽帧+字幕/音频转写稿/截屏/OCR
+│   ├── a2a.py          # A2A 0.3.0 服务端：Agent Card + JSON-RPC（send/stream/get/cancel）
 │   └── permissions.py  # 三级自主权 + 可逆性分级
 ├── providers/          # 模型供给（豆包宿主 host / OpenAI 兼容 / 本地 mock）
 ├── server/

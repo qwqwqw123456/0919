@@ -1137,7 +1137,9 @@ def main(argv: list[str] | None = None) -> int:
         if problem:
             print(f"拒绝启动：{problem}", file=sys.stderr)
             return 2
-        uvicorn.run(create_app(cfg), host=host, port=args.port or cfg.port)
+        cfg.serve_host = host
+        cfg.port = args.port or cfg.port
+        uvicorn.run(create_app(cfg), host=host, port=cfg.port)
         return 0
 
     return asyncio.run(_run_cli(args, cfg))
