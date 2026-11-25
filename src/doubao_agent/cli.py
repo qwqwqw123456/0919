@@ -14,6 +14,7 @@ import yaml
 
 from .config import Config, load_config
 from .core.audit import AuditLog
+from .core.multimodal import ingest
 from .core.evolution import EvolutionStore
 from .core.recipe import RecipeStore
 from .core.intake import explain as explain_intake, parse_task
@@ -890,8 +891,19 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "run":
             if getattr(args, "no_record", False):
                 runtime.config.record_recipes = False
+            bundle = ingest(
+                list(getattr(args, "attach", None) or []),
+                screen=bool(getattr(args, "screen", False)),
+                ocr_enabled=bool(getattr(args, "ocr", False)),
+            )
+            for warning in bundle.warnings:
+                print(f"[附件] {warning}", file=sys.stderr)
+            images = list(args.image or []) + bundle.images
+            task = args.task
+            if bundle.notes:
+                task = f"{bundle.notes}\n\n任务：{args.task}"
             result = await runtime.start_run(
-                args.task, args.session, on_event=_print_event, images=args.image
+                task, args.session, on_event=_print_event, images=images or None
             )
             recipe = f" recipe=#{result['recipe_id']}" if result.get("recipe_id") else ""
             print(
@@ -979,6 +991,12 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument(
         "--image", action="append", default=None, help="附带图片（可重复），需模型支持视觉"
     )
+    run_parser.add_argument(
+        "--attach", action="append", default=None,
+        help="附带任意附件（可重复）：图片 / 视频（抽帧+字幕）/ 音频（读同名转写稿）",
+    )
+    run_parser.add_argument("--screen", action="store_true", help="先截当前桌面再跑（需图形会话）")
+    run_parser.add_argument("--ocr", action="store_true", help="对附带的图片/帧做 OCR，文字进上下文")
 
     sub.add_parser("recipes", help="列出已录制的配方")
     replay_parser = sub.add_parser("replay", help="按配方零模型重放")
