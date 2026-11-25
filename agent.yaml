@@ -33,6 +33,14 @@ auth_token: ""
 model:
   provider: openai
   base_url: https://api.longcat.chat/openai/v1
+  model: LongCat-2.5-Preview
+  api_key_env: OPENAI_API_KEY
+  temperature: 0.2
+
+# 主通道故障（如今天遇到的 504 网关超时）时自动退到同账号的稳定版，不换密钥、不额外付费通道
+model_fallback:
+  provider: openai
+  base_url: https://api.longcat.chat/openai/v1
   model: LongCat-2.5
   api_key_env: OPENAI_API_KEY
   temperature: 0.2
