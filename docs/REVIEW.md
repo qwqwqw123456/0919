@@ -125,7 +125,7 @@
 1. 执行沙箱（容器 / Landlock / seccomp / nsjail）：env 白名单、只读根、工作区可写。
 2. 模型流式输出，降首字延迟。
 3. 多租户 RBAC：token→角色，会话/知识库/缓存/审计按租户隔离。
-4. A2A 客户端侧与共享记忆契约（服务端 0.3.0 已落地：card + send/stream/get/cancel，2026-11-25）；eval 扩充安全/并发/降级/断链用例。
+4. A2A 共享记忆契约与 push notification（服务端 0.3.0 + 客户端 discover/send/wait/cancel 均已落地，默认回环白名单，2026-11-25）；eval 扩充安全/并发/降级/断链用例。
 
 ## 七、验收标准（可测）
 

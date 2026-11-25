@@ -78,6 +78,7 @@ src/doubao_agent/
 │   ├── db.py           # SQLite 统一入口：WAL + busy_timeout + synchronous
 │   ├── multimodal.py   # 附件入口：图片/视频抽帧+字幕/音频转写稿/截屏/OCR
 │   ├── a2a.py          # A2A 0.3.0 服务端：Agent Card + JSON-RPC（send/stream/get/cancel）
+│   ├── a2a_client.py   # A2A 客户端：白名单校验 + card/send/wait/cancel
 │   └── permissions.py  # 三级自主权 + 可逆性分级
 ├── providers/          # 模型供给（豆包宿主 host / OpenAI 兼容 / 本地 mock）
 ├── server/

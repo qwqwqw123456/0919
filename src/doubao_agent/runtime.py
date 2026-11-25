@@ -30,6 +30,7 @@ from .providers.embedding import BridgeEmbedding
 from .registry import CapabilityRegistry
 from .skills import SkillManager
 from .sources import (
+    A2ASource,
     ApiSource,
     HttpHostBridge,
     KnowledgeSource,
@@ -152,6 +153,9 @@ class Runtime:
         knowledge = KnowledgeStore(config.db_path, aembed=aembed)
         registry.add_source(KnowledgeSource(knowledge))
         registry.add_source(SystemSource(config.workspace))
+        registry.add_source(
+            A2ASource(allow=list(getattr(config, "a2a_allow", []) or []), token="")
+        )
 
         await registry.refresh()
 

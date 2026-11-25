@@ -53,3 +53,9 @@ mcp_servers: []
 #    transport: http
 #    url: http://127.0.0.1:8091/mcp
 api_sources: []
+
+# A2A 出站白名单：默认只允许回环；要调外部 Agent 就把地址（host 或 host:port）加进来
+a2a_allow:
+  - 127.0.0.1
+  - localhost
+  - "::1"

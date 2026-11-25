@@ -1083,6 +1083,14 @@ def main(argv: list[str] | None = None) -> int:
     parallel_parser.add_argument("--subtasks", default=None, help="逗号分隔的子任务列表（省略则自动拆解）")
     parallel_parser.add_argument("--review", action="store_true", help="追加审阅者：合并结果并指出冲突")
 
+    a2a_parser = sub.add_parser("a2a", help="A2A 客户端：discover / send / cancel 远端 Agent")
+    a2a_parser.add_argument("action", choices=["discover", "send", "cancel"])
+    a2a_parser.add_argument("--url", required=True, help="对端 A2A 端点，如 http://127.0.0.1:8799/a2a")
+    a2a_parser.add_argument("--task", default=None, help="send 时的任务文本")
+    a2a_parser.add_argument("--task-id", default=None, help="cancel 时的 task id")
+    a2a_parser.add_argument("--timeout", type=float, default=600.0, help="最长等待秒数，默认 600")
+    a2a_parser.add_argument("--allow", action="append", default=None, help="追加出站白名单（可重复）")
+
     serve_parser = sub.add_parser("serve", help="启动本地控制台")
     serve_parser.add_argument("--port", type=int, default=None)
     serve_parser.add_argument(
@@ -1142,7 +1150,46 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run(create_app(cfg), host=host, port=cfg.port)
         return 0
 
+    if args.cmd == "a2a":
+        return asyncio.run(_a2a_command(args, cfg))
+
     return asyncio.run(_run_cli(args, cfg))
+
+
+async def _a2a_command(args: argparse.Namespace, cfg: Config) -> int:
+    """A2A 客户端命令行；token 只从环境变量读，不接受明文参数。"""
+    from .core.a2a_client import A2AClient, A2AError, summarize_card, summarize_task
+
+    allow = list(getattr(cfg, "a2a_allow", []) or [])
+    if args.allow:
+        allow.extend(args.allow)
+    token = os.environ.get("AGENT_A2A_TOKEN", "")
+    client: A2AClient | None = None
+    try:
+        client = A2AClient(args.url, token=token, allow=allow, timeout=max(10.0, args.timeout))
+        if args.action == "discover":
+            print(summarize_card(await client.card()))
+            return 0
+        if args.action == "send":
+            if not (args.task or "").strip():
+                print("send 需要 --task", file=sys.stderr)
+                return 2
+            task = await client.send(args.task, wait=True, max_wait=args.timeout)
+            print(summarize_task(task))
+            return 0 if str(task.get("status", {}).get("state")) == "completed" else 1
+        if args.action == "cancel":
+            if not (args.task_id or "").strip():
+                print("cancel 需要 --task-id", file=sys.stderr)
+                return 2
+            print(summarize_task(await client.cancel(args.task_id)))
+            return 0
+        return 2
+    except A2AError as exc:
+        print(f"A2A 失败：{exc}", file=sys.stderr)
+        return 1
+    finally:
+        if client is not None:
+            await client.aclose()
 
 
 if __name__ == "__main__":  # pragma: no cover

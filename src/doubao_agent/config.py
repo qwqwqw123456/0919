@@ -112,6 +112,7 @@ class Config:
     port: int = DEFAULT_PORT
     serve_host: str = "127.0.0.1"      # 控制台监听地址：默认只绑回环，绑全网必须同时配 auth_token
     auth_token: str = ""               # 控制台 /api 鉴权令牌；为空表示不鉴权（仅限本机）
+    a2a_allow: list[str] = field(default_factory=lambda: ["127.0.0.1", "localhost", "::1"])  # A2A 出站白名单
     model: dict[str, Any] = field(default_factory=dict)
     model_fallback: dict[str, Any] = field(default_factory=dict)  # 备用真实 provider 配置，结构同 model；空=不启用
     bridge: dict[str, Any] = field(default_factory=dict)
@@ -256,6 +257,9 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.port = int(data.get("port", cfg.port))
         cfg.serve_host = str(data.get("serve_host", cfg.serve_host) or "127.0.0.1")
         cfg.auth_token = str(data.get("auth_token", cfg.auth_token) or "")
+        allow = data.get("a2a_allow")
+        if isinstance(allow, list):
+            cfg.a2a_allow = [str(x).strip() for x in allow if str(x).strip()]
         cfg.model = dict(data.get("model") or _default_model())
         cfg.model_fallback = dict(data.get("model_fallback") or {})
         cfg.bridge = dict(data.get("bridge") or {})
@@ -274,6 +278,9 @@ def load_config(path: str | Path | None = None) -> Config:
     # Environment overrides win, so the cloud desktop can inject config at runtime.
     cfg.port = int(os.environ.get("AGENT_PORT", cfg.port))
     cfg.auth_token = os.environ.get("AGENT_AUTH_TOKEN", cfg.auth_token)
+    allow_env = os.environ.get("AGENT_A2A_ALLOW")
+    if allow_env is not None:
+        cfg.a2a_allow = [x.strip() for x in allow_env.split(",") if x.strip()]
     cfg.permission_mode = os.environ.get("AGENT_PERMISSION_MODE", cfg.permission_mode)
     cfg.script_risk = os.environ.get("AGENT_SCRIPT_RISK", cfg.script_risk)
     if os.environ.get("AGENT_SCRIPT_MAX_CPU"):

@@ -1,3 +1,4 @@
+from .a2a import A2ASource
 from .base import CapabilitySource, SourceError
 from .bridge import HostBridge, HttpHostBridge
 from .browser import browser_specs
@@ -11,6 +12,7 @@ from .skill import SkillSource
 from .system import SystemSource
 
 __all__ = [
+    "A2ASource",
     "ApiSource",
     "CapabilitySource",
     "HostBridge",
