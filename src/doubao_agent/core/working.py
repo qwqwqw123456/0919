@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
+from .db import connect as connect_db
 
 # 第一层：会话状态文件（工作记忆）。字段固定，开工前必须先读。
 FIELDS = (
@@ -57,7 +58,7 @@ class WorkingMemory:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._mutex = threading.RLock()
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = connect_db(self.db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

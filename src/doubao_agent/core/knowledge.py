@@ -7,6 +7,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Sequence
+from .db import connect as connect_db
 
 # 第三层：七个知识域（域索引），编号固定，名称可匹配。
 DOMAINS: dict[str, str] = {
@@ -140,7 +141,7 @@ class KnowledgeStore:
         self.aembed = aembed
         self._lock = threading.Lock()
         self._vec_cache: dict[str, tuple[float, ...]] = {}
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = connect_db(self.db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._migrate()

@@ -75,6 +75,7 @@ src/doubao_agent/
 │   ├── outbound.py     # 出站通道：脱敏 → 去重 → 日上限 → console/飞书/SMTP
 │   ├── profile.py      # 关于你：键值画像 + 变更历史（来源/置信/可停用）
 │   ├── secrets.py      # 凭据兜底：env → vault-file → keyring → vault-cmd → 加密库
+│   ├── db.py           # SQLite 统一入口：WAL + busy_timeout + synchronous
 │   └── permissions.py  # 三级自主权 + 可逆性分级
 ├── providers/          # 模型供给（豆包宿主 host / OpenAI 兼容 / 本地 mock）
 ├── server/

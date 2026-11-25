@@ -63,7 +63,9 @@
 | --- | --- | --- |
 | P1-1 | **工作记忆全局单行**，并行子任务互相覆盖：焦点线/工作流节点/待回顾被最后完成者改写，计数被放大 | `working.py:37` `CHECK(id=1)`；`working.py:119-145` |
 | P1-2 | **10 个 Store 各自开 SQLite 连接**，无 WAL、无 busy_timeout；跨进程（daemon+CLI 同库）易 `database is locked`，默认回滚日志读写互阻 | session/memory/working/longterm/knowledge/recipe/scheduler/journal/telemetry/evolution 各一处 `sqlite3.connect`；全库无 `journal_mode`/`busy_timeout` |
+| ↑ | **2026-11-25 进展**：12 个 Store 统一走 `core/db.py`，开 WAL + busy_timeout 30s + synchronous=NORMAL；实测 4 进程各 200 写零锁错、线上库落到 `-wal`/`-shm` | `core/db.py` |
 | P1-3 | **异常时会话不收尾**：`run()` finally 只结工作记忆，没 `sessions.finish("failed")`，CLI/并行路径会话悬挂 running；只有服务端外层兜底 | `agent.py:429-436`；兜底见 `app.py:271,296,327` |
+| ↑ | **2026-11-25 进展**：`Agent.run` finally 补 `_close_dangling_session`，异常逃逸时把仍是 running 的会话改 failed；实测 provider 抛异常后会话状态 failed、running 列表为空 | `agent.py` |
 | P1-4 | **审计链偏弱**：哈希截断 16 hex（64bit）；追加读尾+写无文件锁，`_last` 内存缓存跨进程会 stale 断链；脱敏只按字段名，`code/command/content` 内嵌的 Bearer/api_key= 不打码；无 seq；长文件全量读入再切片 | `audit.py:85`、`audit.py:88-91`、`audit.py:27-40`、`audit.py:93-106` |
 | ↑ | **2026-11-25 进展**：跨进程 `flock` + 完整 64 hex 摘要已落地，校验兼容历史 16 hex；字段名脱敏与无 seq 仍未改 | `audit.py` |
 | P1-5 | **Planner/Coordinator/摘要绕过统一模型层**：直连 `provider.complete`，没重试/降级/遥测；decompose docstring 承诺"失败兜底单任务"但无 try/except；摘要调用不计 usage | `planner.py:134-141`、`coordinator.py:101-107`、`coordinator.py:218`、`agent.py:84-102` |

@@ -6,6 +6,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from .db import connect as connect_db
 
 # 自进化第三块：技能用量遥测 + 生命周期 + 配方蒸馏（机制取自 Hermes curator）
 # 边界：只记账与改状态位，不删除任何技能文件；蒸馏只产出草案，不自动安装。
@@ -54,7 +55,7 @@ class EvolutionStore:
         self.stale_days = max(1, int(stale_days))
         self.archive_days = max(self.stale_days, int(archive_days))
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = connect_db(self.db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

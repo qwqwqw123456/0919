@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 52 个 Python 文件 / 9585 行 / 37 测试文件 / 216 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 53 个 Python 文件 / 9652 行 / 39 测试文件 / 221 passed，分支 `feat/evolution-layer`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
@@ -18,6 +18,7 @@
 | 触发与并发 | 控制台 `POST /api/run`、`/api/webhook`（令牌/HMAC 签名）、`/api/parallel`、`/api/schedules`；全局 `Semaphore(3)` 并发闸 |
 | 离线评估集 | `eval/golden/skills.json` 规则样例 + `eval/runner.py` 判定器，纳入 pytest 闸门；模型端到端样例占位 |
 | 多模态输入 | `run --image`（可重复，单张 ≤5MB，OpenAI `image_url`） |
+| 持久层并发 | 12 个 Store 统一走 `core/db.py`（WAL + busy_timeout 30s + synchronous=NORMAL）；异常逃逸的会话在 `Agent.run` finally 收成 `failed`，不留 running 悬挂 |
 | 可靠性与可观测 | `tool_runs` 同会话幂等只读/可逆工具按参数指纹回放（L2/L3 永不重放）；`spans` 记录模型/工具耗时与成败，`metrics` 与 `GET /api/metrics`、`/api/sessions/{id}/trace` 聚合；`audit export` 先校验哈希链再导出；记忆 `feedback` 命中成功加分/失败降权、`decay` 半衰期衰减（偏好不衰减）；知识库 `domain=auto` 关键词路由；`parallel --review` 审阅者合并结果并标注冲突；journal preview 截断 2000 字符，回放静默截断、无 `truncated` 标记 |
 
 ## 2. 运行时缺口
@@ -67,4 +68,4 @@
 
 ## 4. 建议优先级
 
-运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.65 / 0.3.0，216 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。
+运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.66 / 0.3.0，221 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。

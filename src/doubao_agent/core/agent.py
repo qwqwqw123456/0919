@@ -295,6 +295,8 @@ class Agent:
         self.working = working
         self.repair_rounds = repair_rounds
         self.cancel_event = cancel_event or asyncio.Event()
+        # 本轮真正在跑的会话：异常逃逸时用它把会话从 running 收成 failed，避免悬挂。
+        self._live_session_id: str | None = None
         # 端点兜底：默认不降级（不静默换模型），由配置显式开启备用 provider。
         self.fallback_provider = fallback_provider
         self.provider_retries = max(0, provider_retries)
@@ -472,6 +474,22 @@ class Agent:
         finally:
             if self.working is not None:
                 self.working.end_session(status, summary)
+            self._close_dangling_session()
+
+    def _close_dangling_session(self) -> None:
+        """异常路径没走到 finish 时补一刀：只在会话仍是 running 时才改，幂等。"""
+        session_id = self._live_session_id
+        self._live_session_id = None
+        if not session_id:
+            return
+        try:
+            row = self.sessions.get(session_id)
+            if row and str(row.get("status")) == "running":
+                self.sessions.finish(
+                    session_id, "运行中断：异常未收尾，已由运行时标记 failed", "failed"
+                )
+        except Exception:  # 收尾失败不能盖掉原始异常
+            pass
 
     async def _mark_degraded(
         self,
@@ -512,8 +530,10 @@ class Agent:
         if existing is None:
             session_id = self.sessions.create(task)
             history = []
+            self._live_session_id = session_id
         else:
             task = existing["task"]
+            self._live_session_id = session_id
 
         # 只有在真正恢复已有进度的会话时才允许回放工具结果；
         # 单次运行内模型重复发起同一调用属于用户意图，照常执行。
@@ -660,7 +680,9 @@ class Agent:
         session_id: str | None = None,
     ) -> dict[str, Any]:
         """执行入口规划；一次规划一次执行，之后不再回调模型。"""
-        session_id = session_id or self.sessions.create(task)
+        if not session_id:
+            session_id = self.sessions.create(task)
+        self._live_session_id = session_id
         self.sessions.append_message(session_id, 0, {"role": "user", "content": task})
         self.audit.append(session_id, "start", task=task, planned=True, mode=plan.mode)
         await self._emit(

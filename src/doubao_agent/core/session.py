@@ -7,6 +7,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from .db import connect as connect_db
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -54,7 +55,7 @@ class SessionStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = connect_db(self.db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
