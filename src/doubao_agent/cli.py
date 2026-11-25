@@ -17,6 +17,7 @@ from .core.audit import AuditLog
 from .core.evolution import EvolutionStore
 from .core.recipe import RecipeStore
 from .core.memory import KINDS as MEMORY_KINDS
+from .core.personal import ConfirmRequired, PersonalStore, build_briefing, check_gate
 from .mcp_server import serve, serve_http
 from .runtime import Runtime
 from .types import ToolCall, ToolSpec
@@ -313,6 +314,103 @@ def _memory_command(memory, args: argparse.Namespace) -> int:
     for kind, count in stats["kinds"].items():
         print(f"  {kind}\t{count}")
     return 0
+
+
+def _parse_due(value: str | None) -> float | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return time.mktime(time.strptime(value, fmt))
+        except ValueError:
+            continue
+    raise ValueError(f"截止时间格式应为 YYYY-MM-DD[ HH:MM]，收到：{value}")
+
+
+def _pa_command(runtime: Runtime, args: argparse.Namespace) -> int:
+    store = PersonalStore(runtime.config.db_path)
+    try:
+        if args.action == "brief":
+            for line in build_briefing(store.list(), store.pushes(20)):
+                print(line)
+            return 0
+
+        if args.action == "list":
+            rows = store.list(args.status)
+            if not rows:
+                print("还没有跟进任务，用 `pa add` 登记一条")
+                return 0
+            for row in rows:
+                due = _fmt_time(row["due_at"]) if row["due_at"] else "长期"
+                print(
+                    f"#{row['id']}\t{row['status']}\t级{row['confirm_level']}\t{row['name']}\t"
+                    f"{row['freq']}\t到期={due}\t上次={row['last_result'] or '-'}"
+                )
+            return 0
+
+        if args.action == "add":
+            if not (args.name and args.target and args.condition):
+                print("用法: pa add --name 名称 --target 监控对象 --condition 触发条件", file=sys.stderr)
+                return 2
+            try:
+                due = _parse_due(args.due)
+                task_id = store.add(
+                    args.name,
+                    args.target,
+                    args.condition,
+                    freq=args.freq,
+                    action=args.act,
+                    confirm_level=args.confirm,
+                    due_at=due,
+                    note=args.note or "",
+                )
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+            print(f"已登记跟进 #{task_id}：{args.name}（确认级别 {args.confirm}，{args.freq}）")
+            return 0
+
+        if args.action in ("pause", "resume", "done"):
+            if not args.args:
+                print(f"用法: pa {args.action} <id>", file=sys.stderr)
+                return 2
+            task_id = int(args.args[0].lstrip("#"))
+            target = {"pause": "paused", "resume": "active", "done": "done"}[args.action]
+            ok = store.set_status(task_id, target)
+            print(f"#{task_id} → {target}" if ok else f"未找到 #{task_id}")
+            return 0 if ok else 1
+
+        if args.action == "check":
+            if not args.args:
+                print("用法: pa check <id> --result 结果", file=sys.stderr)
+                return 2
+            task_id = int(args.args[0].lstrip("#"))
+            ok = store.touch(task_id, args.result or "无命中")
+            print(f"#{task_id} 已记录检查结果" if ok else f"未找到 #{task_id}")
+            return 0 if ok else 1
+
+        if args.action == "push":
+            if not args.args:
+                print("用法: pa push <id> --result 摘要", file=sys.stderr)
+                return 2
+            task_id = int(args.args[0].lstrip("#"))
+            store.log_push(task_id, args.result or "命中")
+            print(f"#{task_id} 推送已记账")
+            return 0
+
+        if args.action == "gate":
+            try:
+                check_gate(args.confirm, user_confirmed=args.confirmed)
+            except ConfirmRequired as exc:
+                print(str(exc), file=sys.stderr)
+                return 3
+            print("闸门放行")
+            return 0
+
+        print(f"未知动作: {args.action}", file=sys.stderr)
+        return 2
+    finally:
+        store.close()
 
 
 def _fmt_time(timestamp: float | None) -> str:
@@ -694,6 +792,9 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "schedule":
             return await _schedule_command(runtime, args)
 
+        if args.cmd == "pa":
+            return _pa_command(runtime, args)
+
         if args.cmd == "knowledge":
             return _knowledge_command(runtime, args)
 
@@ -859,6 +960,23 @@ def main(argv: list[str] | None = None) -> int:
     schedule_parser.add_argument("action", choices=["add", "list", "remove", "enable", "disable", "run"])
     schedule_parser.add_argument("args", nargs="*", default=[])
     schedule_parser.add_argument("--name", default=None, help="任务名称（仅 add）")
+
+    pa_parser = sub.add_parser("pa", help="个人助理层：状态卡 / 跟进任务 / 推送记账 / 确认闸门")
+    pa_parser.add_argument(
+        "action", choices=["brief", "list", "add", "pause", "resume", "done", "check", "push", "gate"]
+    )
+    pa_parser.add_argument("args", nargs="*", default=[], help="任务 id，如 3 或 #3")
+    pa_parser.add_argument("--name", default=None, help="任务名（add）")
+    pa_parser.add_argument("--target", default=None, help="监控对象，要落到可检索实体（add）")
+    pa_parser.add_argument("--condition", default=None, help="触发条件，要能判真假（add）")
+    pa_parser.add_argument("--freq", default="daily", help="检查频率：6h / daily / weekly（add）")
+    pa_parser.add_argument("--act", default="push", help="命中后动作：push / remind / run（add）")
+    pa_parser.add_argument("--confirm", type=int, default=0, choices=[0, 1, 2], help="确认级别（add/gate）")
+    pa_parser.add_argument("--due", default=None, help="到期时间 YYYY-MM-DD[ HH:MM]")
+    pa_parser.add_argument("--note", default=None, help="备注与默认假设")
+    pa_parser.add_argument("--result", default=None, help="本次检查/推送结果")
+    pa_parser.add_argument("--status", default=None, choices=["active", "paused", "done"], help="list 过滤")
+    pa_parser.add_argument("--confirmed", action="store_true", help="gate：用户已明确同意")
 
     knowledge_parser = sub.add_parser(
         "knowledge", help="知识库：文档导入 / 检索 / 删除 / 统计 / 七域索引"
