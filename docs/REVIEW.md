@@ -65,6 +65,7 @@
 | P1-2 | **10 个 Store 各自开 SQLite 连接**，无 WAL、无 busy_timeout；跨进程（daemon+CLI 同库）易 `database is locked`，默认回滚日志读写互阻 | session/memory/working/longterm/knowledge/recipe/scheduler/journal/telemetry/evolution 各一处 `sqlite3.connect`；全库无 `journal_mode`/`busy_timeout` |
 | P1-3 | **异常时会话不收尾**：`run()` finally 只结工作记忆，没 `sessions.finish("failed")`，CLI/并行路径会话悬挂 running；只有服务端外层兜底 | `agent.py:429-436`；兜底见 `app.py:271,296,327` |
 | P1-4 | **审计链偏弱**：哈希截断 16 hex（64bit）；追加读尾+写无文件锁，`_last` 内存缓存跨进程会 stale 断链；脱敏只按字段名，`code/command/content` 内嵌的 Bearer/api_key= 不打码；无 seq；长文件全量读入再切片 | `audit.py:85`、`audit.py:88-91`、`audit.py:27-40`、`audit.py:93-106` |
+| ↑ | **2026-11-25 进展**：跨进程 `flock` + 完整 64 hex 摘要已落地，校验兼容历史 16 hex；字段名脱敏与无 seq 仍未改 | `audit.py` |
 | P1-5 | **Planner/Coordinator/摘要绕过统一模型层**：直连 `provider.complete`，没重试/降级/遥测；decompose docstring 承诺"失败兜底单任务"但无 try/except；摘要调用不计 usage | `planner.py:134-141`、`coordinator.py:101-107`、`coordinator.py:218`、`agent.py:84-102` |
 | P1-6 | **MCP 一次失败永久锁存**：`_failed` 后不再重连、无退避，health 也不重置；stdio 子进程继承全量环境变量（含密钥） | `mcp.py:73-79`、`mcp.py:133` |
 | P1-7 | **技能通道取消/进程组回收缺失**：无 `start_new_session`，超时只 kill 直进程、子进程泄漏；不读 cancel_event。对照 script 通道三者齐全，能力不一致 | `skill.py:105-128`；对照 `script.py:121-134,181` |

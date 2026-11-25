@@ -429,6 +429,21 @@ def _notify_command(runtime: Runtime, args: argparse.Namespace) -> int:
     return 1
 
 
+def _secrets_command(cfg: Config, args: argparse.Namespace) -> int:
+    """凭据后端自查：只报可用性，不回显任何密钥值。"""
+    from .core.secrets import status
+
+    for row in status():
+        mark = "可用" if row["available"] else "不可用"
+        print(f"{mark}\t{row['name']}\t{row['note']}")
+    if cfg.secret_sources:
+        sources = "、".join(f"{name}←{source}" for name, source in cfg.secret_sources.items())
+        print(f"本次启动已兜底补入：{sources}")
+    else:
+        print("本次启动无兜底补入（环境变量已覆盖或后端均不可用）")
+    return 0
+
+
 def _fmt_time(timestamp: float | None) -> str:
     return time.strftime("%F %T", time.localtime(timestamp)) if timestamp else "-"
 
@@ -1060,6 +1075,9 @@ def main(argv: list[str] | None = None) -> int:
     daemon_parser.add_argument("action", choices=["start", "stop", "status"])
     daemon_parser.add_argument("--port", type=int, default=None)
 
+    secrets_parser = sub.add_parser("secrets", help="凭据后端：查可用性（keyring / 平台 vault / 加密库）")
+    secrets_parser.add_argument("action", choices=["status"], nargs="?", default="status")
+
     audit_parser = sub.add_parser("audit", help="审计：校验哈希链 / 列出有审计的会话")
     audit_parser.add_argument(
         "action", nargs="?", choices=["verify", "sessions", "export"], default="verify"
@@ -1078,6 +1096,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "daemon":
         return _daemon_command(args, cfg)
+
+    if args.cmd == "secrets":
+        return _secrets_command(cfg, args)
 
     if args.cmd == "audit":
         return _audit_command(args, cfg)

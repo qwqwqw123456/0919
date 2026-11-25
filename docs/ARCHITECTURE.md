@@ -70,7 +70,11 @@ src/doubao_agent/
 │   ├── recipe.py       # 录制回放：成功轨迹存配方，零模型调用重放
 │   ├── scheduler.py    # cron 定时触发器：解析、next_run、到期派发
 │   ├── coordinator.py  # 并行协同：拆解 → 并发执行子任务 → 汇总
-│   ├── audit.py        # 全链路审计与回放
+│   ├── audit.py        # 全链路审计与回放（64 hex 哈希链 + 跨进程锁）
+│   ├── intake.py       # 人话入口：一句话 → 任务卡（对象/条件/频率/到期/动作/确认级）
+│   ├── outbound.py     # 出站通道：脱敏 → 去重 → 日上限 → console/飞书/SMTP
+│   ├── profile.py      # 关于你：键值画像 + 变更历史（来源/置信/可停用）
+│   ├── secrets.py      # 凭据兜底：env → vault-file → keyring → vault-cmd → 加密库
 │   └── permissions.py  # 三级自主权 + 可逆性分级
 ├── providers/          # 模型供给（豆包宿主 host / OpenAI 兼容 / 本地 mock）
 ├── server/

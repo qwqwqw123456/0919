@@ -1,6 +1,6 @@
 # 缺口路线图 GAPS
 
-> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 51 个 Python 文件 / 9282 行 / 35 测试文件 / 202 passed，分支 `feat/evolution-layer`）。
+> 口径：以下结论来自 `src/doubao_agent/` 源码实读与本机实跑（基线 52 个 Python 文件 / 9585 行 / 37 测试文件 / 216 passed，分支 `feat/evolution-layer`）。
 > 本表只登记「现状证据 → 缺口 → 归属 → 优先级 → 验收方向」，不重复 `ARCHITECTURE.md` 的设计原则。归属分两类：**运行时**（本仓库可改）、**平台侧**（云电脑宿主提供，运行时只做隔离适配）。
 
 ## 1. 已覆盖（不再重复规划）
@@ -10,7 +10,7 @@
 | 三层记忆 + 检索 | `working_state` / `lessons·observations·deviations` / `documents·chunks`；知识库同步+异步检索，向量失败退回关键词混合 |
 | 上下文压缩 | `core/agent.py` `_trim_messages`：保留 system + 最近消息，对齐 user 边界；被裁早期 user 要点并入 system 注记 |
 | 调度 / 并行 / 续跑 / 重放 | `schedules` cron；`parallel` 子任务；检查点 + `resume`；配方 `replay` 零模型重放 |
-| 权限与审计 | 风险 L0–L3；`auto / guarded / manual`；审计追加式哈希链 JSONL，凭据按字段名脱敏（`code/command/content` 内嵌值不打码；值模式脱敏仅长期记忆出口）；哈希链当前截断 16 hex、追加无跨进程文件锁 |
+| 权限与审计 | 风险 L0–L3；`auto / guarded / manual`；审计追加式哈希链 JSONL，凭据按字段名脱敏（`code/command/content` 内嵌值不打码；值模式脱敏仅长期记忆出口）；哈希链已用完整 sha256（64 hex）并加 `flock` 跨进程锁串行化追加，校验兼容历史 16 hex 旧链 |
 | 预算与修正 | `max_calls` / `max_tokens` / `repair_rounds`；每次 run 独立 `UsageMeter`（`Runtime._run_meter`），进程级只做累计汇总不设预算，超限以 `incomplete` 收尾 |
 | 注入防护 | 工具/网页/文件输出用不可信头脚包裹，其中指令不得执行（`_UNTRUSTED_HEADER/FOOTER`） |
 | 守护自愈 | `daemon` 子进程退出按退避重启，SIGTERM 优雅收尾 |
@@ -34,7 +34,7 @@
 
 | # | 缺口 | 现状证据 | 验收方向 |
 | --- | --- | --- | --- |
-| G4 | **凭据加密保管** | 审计参数字段递归脱敏；长期记忆落库前对 Bearer / api_key= / JWT / ak·sk 前缀模式打码；`.env.local` 600 权限且 gitignore 排除；仍无 vault/keyring 加密存储，落盘为明文 | 凭据不入日志/记忆/产物；敏感落盘可加密，或明确由平台密钥保管注入 | **部分落地**：出口脱敏已做；加密保管依赖平台 vault，运行时无主密钥来源不做假加密 |
+| G4 | **凭据加密保管** | 审计参数字段递归脱敏；长期记忆落库前对 Bearer / api_key= / JWT / ak·sk 前缀模式打码；`.env.local` 600 权限且 gitignore 排除；`core/secrets.py` 提供三层兜底：系统 keyring（`keyring` 包）、平台 vault（`AGENT_VAULT_FILE` / `AGENT_VAULT_CMD`）、passphrase 加密库（scrypt+AESGCM，`AGENT_VAULT_PASSPHRASE`），优先级 env > vault-file > keyring > vault-cmd > vault-enc，均不可用时不阻断启动、`cli secrets status` 如实报不可用 | 凭据不入日志/记忆/产物；敏感落盘可加密，或明确由平台密钥保管注入 | **已落地（能力层）**：出口脱敏 + 三层兜底；本机未装 `keyring`、无平台 vault 服务，实跑口径为 passphrase 加密库；仍未迁移用户现有 `.env.local`（改造需本人给口令，未擅自搬密钥） |
 | G5 | **工具结果缓存与细粒度限流** | 幂等只读（L0）工具结果已按参数进程内缓存（`tool_cache_enabled`/`tool_cache_ttl`，replay 绕过缓存）；registry 按通道信号量并发上限 `tool_channel_concurrency`（0 不限），超限排队；另挂 `RateLimiter` 按通道 60 秒滑窗速率上限 `tool_rate_limits`，超限返回 `rate limited`；幂等工具遇瞬时错误按 `tool_retries` 指数退避重试；另有全局 `Semaphore(3)` | 幂等工具重复调用命中缓存；按通道设并发/速率上限，超限排队或拒绝而非压垮进程；瞬时失败可退避重试 | **已落地**：结果缓存 + 按通道并发闸 + 速率限流 + 工具瞬时重试已做 |
 | G6 | **provider 异常兜底** | 主 Agent 与 `spawn_agent` 主执行路径均透传 `provider_retries` / `provider_retry_delay` / `provider_fallback=mock` / `model_fallback` / 摘要开关；`_status_of` 已读 `httpx.HTTPStatusError.response.status_code`，400/401/403/404 不重试；降级原因写进最终 `answer`、结果字段 `degraded`、审计 `degraded` 事件与 `degraded` 事件流。默认不降级 | 模型端点失败按策略重试/降级到备用 provider 或 mock，并在结果中显式标注降级 | **已落地**：配置透传 + 状态码判定 + 降级可见（v0.3.0，用例 `tests/test_stage0_hardening.py`） |
 
@@ -67,4 +67,4 @@
 
 ## 4. 建议优先级
 
-运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.64 / 0.3.0，202 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。
+运行时可落地项已收口：G1 webhook 验签 + 文件变更监听（含删除事件与防抖）、G2 离线规则样例 + 在线模型质量回归、G3 规则式早期要点 + 可选模型摘要（默认关）、G4 记忆出口脱敏、G5 只读工具结果缓存 + 按通道并发闸、G6 provider 重试/降级/状态码判定/降级可见、G8 主机资源指标 + 网络/进程级探测，均已落地并纳入 pytest 闸门（基线 v1.65 / 0.3.0，216 passed）。剩余归属平台/宿主侧：G4 平台侧加密 vault（运行时无主密钥来源，不做假加密）、G7 音频/摄像头/屏录、G9 A2A 跨进程协议、G10 桌面 GUI 视觉后端，以及 P1–P5 平台底座；这些按宿主能力开放情况再排期。

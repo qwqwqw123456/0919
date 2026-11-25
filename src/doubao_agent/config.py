@@ -114,6 +114,7 @@ class Config:
     model_fallback: dict[str, Any] = field(default_factory=dict)  # 备用真实 provider 配置，结构同 model；空=不启用
     bridge: dict[str, Any] = field(default_factory=dict)
     outbound: dict[str, Any] = field(default_factory=dict)  # 出站通道：console / feishu / smtp
+    secret_sources: dict[str, str] = field(default_factory=dict)  # 兜底补进来的变量 -> 来源（不含值）
     embedding: dict[str, Any] = field(default_factory=dict)  # 宿主 embedding 能力，默认自动探测
     auto_approve: list[dict[str, Any]] = field(default_factory=list)  # 规则预授权，替代人工审批
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
@@ -156,6 +157,26 @@ def _parse_mcp(items: list[dict[str, Any]]) -> list[MCPServerConfig]:
             )
         )
     return out
+
+
+def _secret_names(cfg: Config) -> list[str]:
+    """需要在兜底层找的变量名：各 provider 的 api_key_env + 鉴权令牌。"""
+    names: list[str] = []
+    for item in (cfg.model, cfg.model_fallback, cfg.embedding):
+        if not isinstance(item, dict):
+            continue
+        env = item.get("api_key_env")
+        if env:
+            names.append(str(env))
+    names.append("AGENT_AUTH_TOKEN")
+    return list(dict.fromkeys(names))
+
+
+def _fill_secrets(cfg: Config) -> dict[str, str]:
+    """环境没有的密钥，从 vault / keyring 兜底补进环境；只记录来源名，不记值。"""
+    from .core.secrets import apply_fallback
+
+    return apply_fallback(_secret_names(cfg))
 
 
 def load_config(path: str | Path | None = None) -> Config:
@@ -301,6 +322,7 @@ def load_config(path: str | Path | None = None) -> Config:
     cfg.runs_dir = Path(os.environ.get("AGENT_RUNS_DIR", cfg.runs_dir))
     if not cfg.model:
         cfg.model = _default_model()
+    cfg.secret_sources = _fill_secrets(cfg)
 
     bridge_url = os.environ.get("AGENT_BRIDGE_URL")
     if bridge_url:
