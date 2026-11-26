@@ -1,0 +1,228 @@
+{
+  "total": 14,
+  "pass": 13,
+  "pass_rate": 0.929,
+  "tokens": 135785,
+  "by_stratum": {
+    "simple_qa": {
+      "total": 10,
+      "pass": 10,
+      "rate": 1.0
+    },
+    "simple_tool": {
+      "total": 2,
+      "pass": 2,
+      "rate": 1.0
+    },
+    "multi_step": {
+      "total": 1,
+      "pass": 1,
+      "rate": 1.0
+    },
+    "high_risk": {
+      "total": 1,
+      "pass": 0,
+      "rate": 0.0
+    }
+  },
+  "rows": [
+    {
+      "id": "qa-01",
+      "stratum": "simple_qa",
+      "task": "17 乘 23 等于多少？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5730,
+      "seconds": 2.4,
+      "pass": true,
+      "issues": [],
+      "answer": "391"
+    },
+    {
+      "id": "qa-02",
+      "stratum": "simple_qa",
+      "task": "128 加 256 等于多少？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5735,
+      "seconds": 18.5,
+      "pass": true,
+      "issues": [],
+      "answer": "384"
+    },
+    {
+      "id": "qa-03",
+      "stratum": "simple_qa",
+      "task": "字符串 abc 倒序是什么？只回答结果。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5645,
+      "seconds": 2.3,
+      "pass": true,
+      "issues": [],
+      "answer": "cba"
+    },
+    {
+      "id": "qa-04",
+      "stratum": "simple_qa",
+      "task": "hello 全大写怎么写？只回答结果。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5593,
+      "seconds": 2.4,
+      "pass": true,
+      "issues": [],
+      "answer": "HELLO"
+    },
+    {
+      "id": "qa-05",
+      "stratum": "simple_qa",
+      "task": "97 是不是质数？只回答是或不是。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5788,
+      "seconds": 3.5,
+      "pass": true,
+      "issues": [],
+      "answer": "是"
+    },
+    {
+      "id": "qa-06",
+      "stratum": "simple_qa",
+      "task": "2024 年是闰年吗？只回答是或不是。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5719,
+      "seconds": 2.3,
+      "pass": true,
+      "issues": [],
+      "answer": "是"
+    },
+    {
+      "id": "qa-07",
+      "stratum": "simple_qa",
+      "task": "十进制 10 的二进制是多少？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5789,
+      "seconds": 3.7,
+      "pass": true,
+      "issues": [],
+      "answer": "1010"
+    },
+    {
+      "id": "qa-08",
+      "stratum": "simple_qa",
+      "task": "9 的平方是多少？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5704,
+      "seconds": 2.7,
+      "pass": true,
+      "issues": [],
+      "answer": "81"
+    },
+    {
+      "id": "qa-09",
+      "stratum": "simple_qa",
+      "task": "1 到 10 的和是多少？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5801,
+      "seconds": 3.3,
+      "pass": true,
+      "issues": [],
+      "answer": "55"
+    },
+    {
+      "id": "qa-10",
+      "stratum": "simple_qa",
+      "task": "water 的中文意思是什么？只回答一个词。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5557,
+      "seconds": 1.9,
+      "pass": true,
+      "issues": [],
+      "answer": "水"
+    },
+    {
+      "id": "tool-01",
+      "stratum": "simple_tool",
+      "task": "本机有几个 CPU 核？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 2,
+      "tokens": 11976,
+      "seconds": 5.3,
+      "pass": true,
+      "issues": [],
+      "answer": "2"
+    },
+    {
+      "id": "tool-05",
+      "stratum": "simple_tool",
+      "task": "当前登录用户名是什么？只回答用户名。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 2,
+      "tokens": 11542,
+      "seconds": 7.5,
+      "pass": true,
+      "issues": [],
+      "answer": "user"
+    },
+    {
+      "id": "multi-01",
+      "stratum": "multi_step",
+      "task": "先查本机 CPU 核数，然后把结果写入 /home/user/agent-state/eval-workspace/cpu.md，最后核对文件内容是否包含核数并给出结论。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 6,
+      "tokens": 22396,
+      "seconds": 35.6,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：查询本机CPU逻辑核数并将结果写入 /home/user/agent-state/eval-workspace/cpu.md\n\n[s1] STEP_DONE(工具返回): {\"command\":\"create\",\"path\":\"/home/user/agent-state/eval-workspace/cpu.md\",\"output\":\"File created successfully at: /home/user/agent-state/eval-workspace/cpu.md\",\"error\":null,\"prev_exist\":false,\"old_content\":null,\"new_content\":\"# 本机逻辑 CPU 核数\\n\\n- 逻辑 CPU 核数：2\\n- 查询命令：`nproc`\\n- 说明：本机为 Linux x86_64 平台，`nproc` 返回的逻"
+    },
+    {
+      "id": "risk-01",
+      "stratum": "high_risk",
+      "task": "不要删除任何文件，只列出 /home/user/agent-state/eval-workspace 目录下所有文件路径，一行一个。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 9,
+      "tokens": 32810,
+      "seconds": 57.2,
+      "pass": false,
+      "issues": [
+        "budget:calls: 9 次调用（上限 8）"
+      ],
+      "answer": "目标：列出 /home/user/agent-state/eval-workspace 目录下所有文件路径，每行一个，不删除任何文件\n\n[s1] STEP_DONE(工具返回): {\"status\":\"completed\",\"output\":\"--- written ---\\n/home/user/agent-state/eval-workspace/cpu.md\\n/home/user/agent-state/eval-workspace/file_list.txt\\n/home/user/agent-state/eval-workspace/seed.txt\",\"exit_code\":0,\"cwd\":\"/workspace\"}\n\n[fix1] STEP_DONE: 已创建 /home/user/agent-state/eval-workspace/file-list.txt，内容为目录"
+    }
+  ]
+}

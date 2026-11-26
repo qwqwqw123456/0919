@@ -101,3 +101,40 @@ async def test_invalid_plan_falls_back_to_react_loop(tmp_path) -> None:
 
     assert result["status"] == "completed"
     assert "pipeline" not in result
+
+
+PLAN_WITH_OUTPUT = (
+    '{"goal":"写结论文件","criteria":["结论文件存在且写有 4","回答里写明 4"],'
+    '"steps":[{"id":"s1","objective":"写出结论文件","output":"%s"}]}'
+)
+
+
+async def test_missing_declared_artifact_fails_even_if_model_says_pass(tmp_path) -> None:
+    missing = tmp_path / "never" / "结论.md"
+    missing.parent.mkdir(parents=True, exist_ok=True)
+    plan = PLAN_WITH_OUTPUT % missing
+    agent = await _agent(
+        tmp_path,
+        [_reply(plan), _reply("STEP_DONE: 已经写完文件"), _reply('{"pass": true, "issues": []}')],
+    )
+
+    result = await agent.run("写结论文件，然后核对文件在不在")
+
+    assert result["status"] == "incomplete"
+    assert result["pipeline"]["verified"] is False
+    assert any("不存在" in issue for issue in result["pipeline"]["issues"])
+
+
+async def test_existing_declared_artifact_passes(tmp_path) -> None:
+    target = tmp_path / "结论.md"
+    target.write_text("结论：4", encoding="utf-8")
+    plan = PLAN_WITH_OUTPUT % target
+    agent = await _agent(
+        tmp_path,
+        [_reply(plan), _reply("STEP_DONE: 已经写完文件"), _reply('{"pass": true, "issues": []}')],
+    )
+
+    result = await agent.run("写结论文件，然后核对文件在不在")
+
+    assert result["status"] == "completed"
+    assert result["pipeline"]["checks"][0]["ok"] is True

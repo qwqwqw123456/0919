@@ -865,6 +865,15 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
             return 0
 
         if args.cmd == "skills":
+            if args.action == "audit":
+                from .core.skill_audit import audit, format_report
+
+                result = audit(runtime.skills, smoke=not getattr(args, "no_smoke", False))
+                if getattr(args, "json", False):
+                    print(json.dumps({k: v for k, v in result.items() if k != "rows"}, ensure_ascii=False, indent=2))
+                else:
+                    print(format_report(result))
+                return 0 if not result["static_bad"] and not result["smoke_bad"] else 1
             if args.action == "reload":
                 count = await runtime.reload_skills()
                 print(f"已重载 {count} 个 Skill")
@@ -918,6 +927,41 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
                 f"steps={result['steps']} {_usage_line(result)}"
             )
             return 0 if result["status"] == "completed" else 1
+
+        if args.cmd == "eval-tasks":
+            from .core.task_eval import load_tasks, prepare_workspace, run_tasks, save_report
+
+            payload = load_tasks()
+            cases = list(payload.get("cases") or [])
+            if getattr(args, "ids", None):
+                wanted = {x.strip() for x in args.ids.split(",") if x.strip()}
+                cases = [c for c in cases if c.get("id") in wanted]
+            if getattr(args, "limit", 0):
+                cases = cases[: args.limit]
+            workspace = prepare_workspace(
+                str(payload.get("workspace") or "/home/user/agent-state/eval-workspace")
+            )
+
+            def _show(row: dict) -> None:
+                mark = "PASS" if row["pass"] else "FAIL"
+                print(
+                    f"{mark}\t{row['id']}\t{row['stratum']}\t{row['route']}\t"
+                    f"{row['calls']} 调用 / {row['tokens']} token / {row['seconds']}s"
+                    + (f"\n     问题：{'；'.join(row['issues'])}" if row["issues"] else "")
+                )
+
+            report = await run_tasks(runtime, cases, workspace, timeout=args.timeout, on_case=_show)
+            target = save_report(report)
+            if args.json:
+                print(json.dumps({k: v for k, v in report.items() if k != "rows"}, ensure_ascii=False, indent=2))
+            else:
+                print(
+                    f"\n通过 {report['pass']}/{report['total']}（{report['pass_rate']:.1%}）"
+                    f"｜token {report['tokens']}｜明细 {target}"
+                )
+                for key, val in report["by_stratum"].items():
+                    print(f"  {key}: {val['pass']}/{val['total']} = {val['rate']:.0%}")
+            return 0 if report["pass"] == report["total"] else 1
 
         if args.cmd == "memory":
             return _memory_command(runtime.memory, args)
@@ -1061,15 +1105,17 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("tools", help="列出统一注册表中的全部工具")
     sub.add_parser("sources", help="检查各接入通道健康状态")
-    skills_parser = sub.add_parser("skills", help="列出 Skill 或热重载技能目录")
+    skills_parser = sub.add_parser("skills", help="列出 Skill / 热重载 / 审计")
     skills_parser.add_argument(
         "action",
         nargs="?",
-        choices=["list", "reload", "install", "uninstall"],
+        choices=["list", "reload", "install", "uninstall", "audit"],
         default="list",
         help="list | reload | install <目录> | uninstall <名称>",
     )
     skills_parser.add_argument("target", nargs="?", default=None, help="安装目录或技能名称")
+    skills_parser.add_argument("--no-smoke", action="store_true", help="审计时跳过实跑")
+    skills_parser.add_argument("--json", action="store_true", help="审计输出 JSON")
     mcp_parser = sub.add_parser("mcp", help="运行时登记 MCP（写入 .agent/mcp.local.yaml）")
     mcp_parser.add_argument("action", choices=["list", "add", "remove"], help="list | add | remove")
     mcp_parser.add_argument("name", nargs="?", default=None, help="MCP 名称")
@@ -1237,6 +1283,12 @@ def main(argv: list[str] | None = None) -> int:
     model_parser.add_argument("action", choices=["list", "use", "probe", "models"], help="动作")
     model_parser.add_argument("name", nargs="?", default=None, help="通道名（use/probe/models）")
     model_parser.add_argument("--set-model", default=None, help="探活时临时指定模型名")
+
+    eval_parser = sub.add_parser("eval-tasks", help="任务级评测：真实任务 + 确定性验收")
+    eval_parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条")
+    eval_parser.add_argument("--ids", default=None, help="指定用例 id，逗号分隔")
+    eval_parser.add_argument("--timeout", type=float, default=240.0, help="单条超时秒数")
+    eval_parser.add_argument("--json", action="store_true", help="打印 JSON 汇总")
 
     calibrate_parser = sub.add_parser("calibrate", help="分流标定：样本门控 + 离线回放候选阈值")
     calibrate_parser.add_argument("--replay", action="store_true", help="跑候选阈值回放")

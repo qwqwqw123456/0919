@@ -1,0 +1,29 @@
+{
+  "total": 1,
+  "pass": 1,
+  "pass_rate": 1.0,
+  "tokens": 5745,
+  "by_stratum": {
+    "simple_qa": {
+      "total": 1,
+      "pass": 1,
+      "rate": 1.0
+    }
+  },
+  "rows": [
+    {
+      "id": "qa-01",
+      "stratum": "simple_qa",
+      "task": "17 乘 23 等于多少？只回答数字。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 1,
+      "tokens": 5745,
+      "seconds": 3.0,
+      "pass": true,
+      "issues": [],
+      "answer": "391"
+    }
+  ]
+}

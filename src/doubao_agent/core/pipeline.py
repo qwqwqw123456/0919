@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Callable
+
+from .verify import check_claimed_paths, check_file, format_evidence, paths_in, summarize
 
 PLAN_PROMPT = """你是任务拆解器。只拆解，不执行，不回答问题。
 输出严格 JSON（不要 Markdown 代码块，不要任何解释）：
-{{"goal":"一句话目标","criteria":["可判真假的验收标准"],"steps":[{{"id":"s1","objective":"只做一件事的步骤"}}]}}
+{{"goal":"一句话目标","criteria":["可判真假的验收标准"],"steps":[{{"id":"s1","objective":"只做一件事的步骤","output":"产物文件的绝对路径，没有就写 null"}}]}}
 
 规则：
 1. 每步只做一件事，步骤不超过 {max_atoms} 个；
 2. 每步必须有可核验产物（文件、数据、结论），不许写"继续处理"这类空话；
+2.0 只有本步真的要写文件时才填 output 绝对路径，否则写 null；路径不许编造，必须是本机可写位置；
 2.1 不要拆"准备/确认/核对/汇报"这类不产生产物的步骤：核对由核验员负责；
 2.2 简单任务（一步能做完）只给一步，不要为了显得完整硬拆；
 2.3 不同步骤不许重复查同一事实，后一步只能基于前一步产物继续加工；
@@ -46,6 +50,9 @@ VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，�
 验收标准：
 {criteria}
 
+工具实测的确定性检查（比文字更可信，FAIL 就是 FAIL）：
+{evidence}
+
 各步产物：
 {context}
 
@@ -53,7 +60,8 @@ VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，�
 {{"pass": true, "issues": ["具体缺口或错误，指明哪一步哪一条"]}}
 判定以最终产物是否满足标准为准：执行器已在步骤里给出的工具返回即视为证据，
 不要要求它再证明"调用发生过"；某步标 STEP_BLOCKED 但整体产物已满足标准时判 pass。
-没有确凿证据指出问题就 pass=true，不要因为"可能不够完美"判失败。"""
+没有确凿证据指出问题就 pass=true，不要因为"可能不够完美"判失败。
+确定性检查里出现 FAIL 时，pass 必须为 false，不许多解释。"""
 
 _JSON_HINT = re.compile(r"\{.*\}", re.S)
 
@@ -174,7 +182,12 @@ class Pipeline:
                 {"pass": True, "issues": [], "deescalated": True}, on_event,
             )
 
-        verdict = await self._verify(goal, criteria, outputs, session_id)
+        checks = self._artifact_checks(plan, outputs)
+        agent.audit.append(
+            session_id, "artifact_checks",
+            pass_=summarize(checks)["pass"], checks=[c["name"] for c in checks if not c["ok"]],
+        )
+        verdict = await self._verify(goal, criteria, outputs, session_id, checks)
         steps_run += 1
         agent.audit.append(session_id, "verify", pass_=verdict["pass"], issues=verdict["issues"])
 
@@ -188,7 +201,8 @@ class Pipeline:
             )
             steps_run += 1
             outputs.append({"id": f"fix{rounds}", "objective": f"修复：{issues}", "output": output})
-            verdict = await self._verify(goal, criteria, outputs, session_id)
+            checks = self._artifact_checks(plan, outputs)
+            verdict = await self._verify(goal, criteria, outputs, session_id, checks)
             steps_run += 1
             agent.audit.append(
                 session_id, "verify", pass_=verdict["pass"], issues=verdict["issues"], round=rounds
@@ -298,24 +312,56 @@ class Pipeline:
         criteria: list[str],
         outputs: list[dict[str, str]],
         session_id: str,
+        checks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """阶段三：独立核验。不给工具、不许修改，只输出 pass 与问题清单。"""
+        """阶段三：独立核验。确定性检查先于模型判断，FAIL 不许被模型推翻。"""
+        checks = checks or []
+        hard = summarize(checks)
         criteria_text = "\n".join(f"- {item}" for item in criteria) or "- （未给出验收标准，按目标判断）"
         messages = [
             {
                 "role": "system",
-                "content": VERIFY_PROMPT.format(goal=goal, criteria=criteria_text, context=self._context(outputs)),
+                "content": VERIFY_PROMPT.format(
+                    goal=goal,
+                    criteria=criteria_text,
+                    evidence=format_evidence(checks),
+                    context=self._context(outputs),
+                ),
             },
             {"role": "user", "content": "开始核验。"},
         ]
         reply = await self.agent._complete(messages, [], session_id)
         data = _parse_json(str(reply.get("content") or "")) or {}
         issues = data.get("issues")
+        model_issues = [str(item) for item in issues] if isinstance(issues, list) else []
+        passed = bool(data.get("pass")) and hard["pass"]
+        merged = list(hard["issues"]) + model_issues
         return {
-            "pass": bool(data.get("pass")),
-            "issues": [str(item) for item in issues] if isinstance(issues, list) else [],
+            "pass": passed,
+            "issues": merged,
+            "checks": checks,
             "raw": str(reply.get("content") or ""),
         }
+
+    def _artifact_checks(self, plan: dict[str, Any], outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """拆解里声明了产物路径就查文件；执行器说写了文件也回查磁盘。"""
+        checks: list[dict[str, Any]] = []
+        for step in plan.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            declared = step.get("output")
+            if isinstance(declared, str) and declared.strip() and declared.strip().lower() != "null":
+                for path in paths_in(declared) or [declared.strip()]:
+                    target = Path(path).expanduser()
+                    # 只查落在本机、且父目录存在的路径，避免把编造路径当失败原因
+                    if target.is_absolute() and target.parent.is_dir():
+                        checks.append(check_file(target))
+                    elif target.is_absolute():
+                        checks.append(
+                            {"name": f"file:{target.name}", "ok": False, "detail": f"父目录不存在：{target.parent}"}
+                        )
+        checks.extend(check_claimed_paths(outputs))
+        return checks
 
     # ---- 收尾 ------------------------------------------------------------
     def _context(self, outputs: list[dict[str, str]]) -> str:
@@ -370,6 +416,7 @@ class Pipeline:
                 "atoms": len(outputs),
                 "verified": bool(verdict and verdict["pass"]),
                 "issues": (verdict or {}).get("issues", []),
+                "checks": (verdict or {}).get("checks", []),
                 "deescalated": bool((verdict or {}).get("deescalated")),
             },
         }
