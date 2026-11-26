@@ -552,7 +552,7 @@ class Agent:
     ) -> dict[str, Any]:
         """入口：先做规则分流，再决定走单循环还是流水线。
 
-        - 明确简单：单循环，套紧预算硬闸（3 次调用 / 2 万 token），失败即升级流水线
+        - 明确简单：单循环，套紧预算硬闸（2 次调用 / 1.5 万 token），失败即升级流水线
         - 其余或拿不准：流水线（拆解 → 逐原子执行 → 独立核验 → 定点修复一次）
         - 带图片：直接单循环，拆解只看文本会丢图
         """
@@ -576,8 +576,8 @@ class Agent:
 
         # 简单任务：预算硬闸，超限或结果不完整就升级，不许在单循环里耗到底
         original = (self.usage.max_calls, self.usage.max_tokens)
-        self.usage.max_calls = min(original[0], 3) if original[0] else 3
-        self.usage.max_tokens = min(original[1], 20000) if original[1] else 20000
+        self.usage.max_calls = min(original[0], 2) if original[0] else 2
+        self.usage.max_tokens = min(original[1], 15000) if original[1] else 15000
         try:
             result = await self._run_loop(task, session_id, on_event, images=images)
         finally:
