@@ -31,6 +31,7 @@ async def _agent(tmp_path, script: list[dict], **pipeline_kwargs) -> Agent:
         audit=AuditLog(tmp_path / "runs"),
         memory=MemoryStore(tmp_path / "agent.db"),
         max_steps=6,
+        pipeline_only_risk=False,
     )
     agent.pipeline = Pipeline(agent, **pipeline_kwargs)
     return agent

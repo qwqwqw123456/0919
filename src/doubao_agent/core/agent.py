@@ -281,6 +281,8 @@ class Agent:
         skills: Any = None,
         pipeline: Any = None,
         sample_rate: float = 0.1,
+        selfcheck_rounds: int = 1,
+        pipeline_only_risk: bool = True,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -289,6 +291,8 @@ class Agent:
         self.audit = audit
         self.memory = memory
         self.max_steps = max_steps
+        self.selfcheck_rounds = max(0, int(selfcheck_rounds))
+        self.pipeline_only_risk = bool(pipeline_only_risk)
         self.recipes = recipes
         self.record_recipes = record_recipes
         self.planner = planner
@@ -568,6 +572,13 @@ class Agent:
             )
 
         decision = decide_route(task, has_image=bool(images))
+        # 参照 Claude Code：非高风险任务即使命中多步/交付物，也走单循环（循环内自查）
+        if decision["route"] == "pipeline" and not decision.get("risk") and self.pipeline_only_risk:
+            decision = {
+                "route": "single",
+                "reason": decision["reason"] + "；非高风险，走单循环+自查",
+                "risk": False,
+            }
         self._route = {
             "decision": decision["route"],
             "reason": decision["reason"],
@@ -576,7 +587,8 @@ class Agent:
             "deescalated": False,
         }
 
-        if decision["route"] == "pipeline":
+        # 参照 Claude Code：默认单循环（循环内自己做核验），只有高风险任务才升级三阶段
+        if decision["route"] == "pipeline" and (decision.get("risk") or not self.pipeline_only_risk):
             piped = await self.pipeline.run(task, session_id, on_event)
             if piped is not None:
                 return self._with_route(piped, task, bool(images))
@@ -587,6 +599,7 @@ class Agent:
 
         # 用户口径：不做预算硬闸，单循环跑完为止；只在没跑完时升级流水线
         result = await self._run_loop(task, session_id, on_event, images=images)
+        result = await self._selfcheck(task, result, on_event)
 
         if result.get("status") != "completed":
             self._route["escalated"] = True
@@ -595,6 +608,32 @@ class Agent:
             if piped is not None:
                 return self._with_route(piped, task, bool(images))
         return self._with_route(result, task, bool(images))
+
+    async def _selfcheck(
+        self, task: str, result: dict[str, Any], on_event: Callable[[dict[str, Any]], Any] | None = None
+    ) -> dict[str, Any]:
+        """循环内自查：执行器自称写了文件就去查盘，硬失败补一轮，不额外叫核验模型。"""
+        from .verify import check_claimed_paths, summarize
+
+        answer = str(result.get("answer") or "")
+        if not answer or result.get("status") != "completed":
+            return result
+        checks = check_claimed_paths([{"id": "final", "objective": "", "output": answer}])
+        hard = summarize(checks)
+        self.audit.append(
+            result.get("session_id") or "", "selfcheck",
+            pass_=hard["pass"], issues=hard["issues"],
+        )
+        if hard["pass"] or self.selfcheck_rounds <= 0:
+            return result
+        self.selfcheck_rounds -= 1
+        issues = "；".join(hard["issues"])
+        await self._emit(on_event, {"type": "selfcheck_repair", "issues": issues})
+        return await self._run_loop(
+            f"{task}\n\n【自查发现】{issues}\n只修复这些缺口再结束，不要重做整个任务。",
+            result.get("session_id"),
+            on_event,
+        )
 
     def _with_route(self, result: dict[str, Any], task: str = "", has_image: bool = False) -> dict[str, Any]:
         """把分流结论与成本写进结果与审计，口径固定，便于离线回放与标定。"""

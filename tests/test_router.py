@@ -49,7 +49,7 @@ def _reply(content: str, calls: list[dict] | None = None) -> dict:
     return {"content": content, "tool_calls": calls or []}
 
 
-async def _agent(tmp_path, script: list[dict], max_steps: int = 6) -> Agent:
+async def _agent(tmp_path, script: list[dict], max_steps: int = 6, only_risk: bool = False) -> Agent:
     registry = await _registry(FakeSource())
     agent = Agent(
         registry=registry,
@@ -59,6 +59,7 @@ async def _agent(tmp_path, script: list[dict], max_steps: int = 6) -> Agent:
         audit=AuditLog(tmp_path / "runs"),
         memory=MemoryStore(tmp_path / "agent.db"),
         max_steps=max_steps,
+        pipeline_only_risk=only_risk,
     )
     agent.pipeline = Pipeline(agent, max_atoms=3, atom_steps=2)
     return agent
@@ -165,3 +166,29 @@ def test_sampling_is_deterministic_and_roughly_ten_percent():
     assert is_sampled("abc") == is_sampled("abc")
     hits = sum(is_sampled(f"s{i}") for i in range(1000))
     assert 60 <= hits <= 140
+
+
+async def test_multistep_without_risk_stays_single_loop(tmp_path) -> None:
+    """参照 Claude Code：非高风险的多步任务默认走单循环，不再固定三阶段。"""
+    agent = await _agent(tmp_path, [_reply("4")], only_risk=True)
+
+    result = await agent.run("先算 2+2，然后给结论")
+
+    assert result["route"]["decision"] == "single"
+    assert "pipeline" not in result
+
+
+async def test_high_risk_still_escalates_to_pipeline(tmp_path) -> None:
+    agent = await _agent(
+        tmp_path,
+        [
+            _reply('{"goal":"给出删除清单","criteria":["列出待删文件"],"steps":'
+                   '[{"id":"s1","objective":"列出待删文件"}]}'),
+            _reply("STEP_DONE: 待删 a.txt"),
+            _reply('{"pass": true, "issues": []}'),
+        ],
+    )
+
+    result = await agent.run("删除旧归档前先给出清单")
+
+    assert result["route"]["decision"] == "pipeline"
