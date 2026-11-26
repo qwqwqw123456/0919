@@ -928,6 +928,25 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
             )
             return 0 if result["status"] == "completed" else 1
 
+        if args.cmd == "route":
+            from .core.router import decide_route, stratum_of
+
+            info = decide_route(args.task, max_simple_chars=args.chars)
+            stratum = stratum_of({"route": info["route"], "risk": info["risk"]}, None)
+            print(
+                json.dumps(
+                    {
+                        "route": info["route"],
+                        "reason": info["reason"],
+                        "risk": info["risk"],
+                        "stratum": stratum,
+                        "chars": len(args.task),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return 0
+
         if args.cmd == "eval-tasks":
             from .core.task_eval import load_tasks, prepare_workspace, run_tasks, save_report
 
@@ -1295,6 +1314,10 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--concurrency", type=int, default=4, help="并发条数（默认 4，1 为串行）")
 
     calibrate_parser = sub.add_parser("calibrate", help="分流标定：样本门控 + 离线回放候选阈值")
+    route_parser = sub.add_parser("route", help="看一条任务会被分发到哪条路径")
+    route_parser.add_argument("--task", required=True, help="待判定的任务原文")
+    route_parser.add_argument("--chars", type=int, default=40, help="短任务字数阈值")
+
     calibrate_parser.add_argument("--replay", action="store_true", help="跑候选阈值回放")
     calibrate_parser.add_argument("--chars", default=None, help="候选字符阈值，逗号分隔")
     calibrate_parser.add_argument("--json", action="store_true", help="输出 JSON")
