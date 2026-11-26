@@ -109,13 +109,18 @@ PLAN_WITH_OUTPUT = (
 )
 
 
-async def test_missing_declared_artifact_fails_even_if_model_says_pass(tmp_path) -> None:
+async def test_claimed_write_that_left_no_file_fails(tmp_path) -> None:
     missing = tmp_path / "never" / "结论.md"
     missing.parent.mkdir(parents=True, exist_ok=True)
     plan = PLAN_WITH_OUTPUT % missing
     agent = await _agent(
         tmp_path,
-        [_reply(plan), _reply("STEP_DONE: 已经写完文件"), _reply('{"pass": true, "issues": []}')],
+        [
+            _reply(plan),
+            _reply(f"STEP_DONE: 已写入 {missing}"),
+            _reply('{"pass": true, "issues": []}'),
+            _reply('{"pass": true, "issues": []}'),
+        ],
     )
 
     result = await agent.run("写结论文件，然后核对文件在不在")
@@ -131,10 +136,15 @@ async def test_existing_declared_artifact_passes(tmp_path) -> None:
     plan = PLAN_WITH_OUTPUT % target
     agent = await _agent(
         tmp_path,
-        [_reply(plan), _reply("STEP_DONE: 已经写完文件"), _reply('{"pass": true, "issues": []}')],
+        [
+            _reply(plan),
+            _reply(f"STEP_DONE: 已写入 {target}"),
+            _reply('{"pass": true, "issues": []}'),
+            _reply('{"pass": true, "issues": []}'),
+        ],
     )
 
     result = await agent.run("写结论文件，然后核对文件在不在")
 
     assert result["status"] == "completed"
-    assert result["pipeline"]["checks"][0]["ok"] is True
+    assert all(item["ok"] for item in result["pipeline"]["checks"])

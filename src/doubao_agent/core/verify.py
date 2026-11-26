@@ -16,12 +16,12 @@ _PATH_RE = re.compile(r"(/[^\s\"'`，。；：、()\[\]{}<>]+?\.(?:md|txt|json|c
 _WRITE_HINTS = ("写入", "写文件", "已保存", "保存到", "生成", "导出", "落盘", "created", "wrote")
 
 
-def _fail(name: str, detail: str) -> dict[str, Any]:
-    return {"name": name, "ok": False, "detail": detail}
+def _fail(name: str, detail: str, hard: bool = True) -> dict[str, Any]:
+    return {"name": name, "ok": False, "detail": detail, "hard": hard}
 
 
-def _ok(name: str, detail: str) -> dict[str, Any]:
-    return {"name": name, "ok": True, "detail": detail}
+def _ok(name: str, detail: str, hard: bool = True) -> dict[str, Any]:
+    return {"name": name, "ok": True, "detail": detail, "hard": hard}
 
 
 def check_file(
@@ -29,28 +29,30 @@ def check_file(
     min_bytes: int = 1,
     contains: Iterable[str] = (),
     must_parse_json: bool = False,
+    hard: bool = True,
 ) -> dict[str, Any]:
     """文件必须存在、非空；可选：包含指定片段、能解析成 JSON。"""
     target = Path(str(path)).expanduser()
     name = f"file:{target.name}"
+    hard_flag = {"hard": hard}
     if not target.is_file():
-        return _fail(name, f"文件不存在：{target}")
+        return _fail(name, f"文件不存在：{target}", hard=hard)
     size = target.stat().st_size
     if size < min_bytes:
-        return _fail(name, f"文件过小：{size} 字节 < {min_bytes}")
+        return _fail(name, f"文件过小：{size} 字节 < {min_bytes}", hard=hard)
     try:
         text = target.read_text("utf-8", errors="replace")
     except OSError as exc:
-        return _fail(name, f"读不了文件：{exc}")
+        return _fail(name, f"读不了文件：{exc}", hard=hard)
     for token in contains:
         if token not in text:
-            return _fail(name, f"缺少片段：{token!r}")
+            return _fail(name, f"缺少片段：{token!r}", hard=hard)
     if must_parse_json:
         try:
             json.loads(text)
         except json.JSONDecodeError as exc:
-            return _fail(name, f"不是合法 JSON：{exc}")
-    return _ok(name, f"{size} 字节，片段与格式检查通过")
+            return _fail(name, f"不是合法 JSON：{exc}", hard=hard)
+    return _ok(name, f"{size} 字节，片段与格式检查通过", hard=hard)
 
 
 def check_text(
@@ -83,6 +85,9 @@ def paths_in(text: str) -> list[str]:
     """从执行器文字里捞绝对路径，用于回查磁盘实物。"""
     seen: list[str] = []
     for match in _PATH_RE.findall(text or ""):
+        # 通配符、占位符、变量拼出来的路径都不是实物，不做磁盘判定
+        if any(ch in match for ch in "*?{}<>$%~"):
+            continue
         if match not in seen:
             seen.append(match)
     return seen
@@ -138,13 +143,18 @@ def run_specs(specs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def summarize(checks: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """只有硬检查参与判定；软检查（拆解器声明的路径）只作证据，不自动判死。"""
     items = list(checks)
-    issues = [f"{c['name']}: {c['detail']}" for c in items if not c["ok"]]
-    return {"pass": not issues, "checks": items, "issues": issues}
+    hard_issues = [f"{c['name']}: {c['detail']}" for c in items if not c["ok"] and c.get("hard", True)]
+    soft_issues = [f"{c['name']}（软）: {c['detail']}" for c in items if not c["ok"] and not c.get("hard", True)]
+    return {"pass": not hard_issues, "checks": items, "issues": hard_issues, "soft_issues": soft_issues}
 
 
 def format_evidence(checks: Iterable[dict[str, Any]]) -> str:
     items = list(checks)
     if not items:
         return "-（无确定性检查）"
-    return "\n".join(f"- {'PASS' if c['ok'] else 'FAIL'} {c['name']}: {c['detail']}" for c in items)
+    return "\n".join(
+        f"- {'PASS' if c['ok'] else ('FAIL' if c.get('hard', True) else 'WARN')} {c['name']}: {c['detail']}"
+        for c in items
+    )

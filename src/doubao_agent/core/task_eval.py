@@ -94,6 +94,8 @@ async def run_tasks(
             result = await asyncio.wait_for(runtime.start_run(task_text), timeout=timeout)
         except asyncio.TimeoutError:
             result = {"status": "timeout", "answer": "", "usage": {}, "route": {}}
+        except Exception as exc:  # noqa: BLE001 - 单条崩溃不能带崩整批评测
+            result = {"status": f"error: {type(exc).__name__}", "answer": "", "usage": {}, "route": {}}
         elapsed = round(time.time() - started, 1)
         verdict = evaluate(case, result, workspace)
         route = result.get("route") or {}

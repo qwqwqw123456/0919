@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .verify import check_claimed_paths, check_file, format_evidence, paths_in, summarize
+from .verify import check_claimed_paths, check_file, claims_write, format_evidence, paths_in, summarize
 
 PLAN_PROMPT = """你是任务拆解器。只拆解，不执行，不回答问题。
 输出严格 JSON（不要 Markdown 代码块，不要任何解释）：
@@ -61,7 +62,9 @@ VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，�
 判定以最终产物是否满足标准为准：执行器已在步骤里给出的工具返回即视为证据，
 不要要求它再证明"调用发生过"；某步标 STEP_BLOCKED 但整体产物已满足标准时判 pass。
 没有确凿证据指出问题就 pass=true，不要因为"可能不够完美"判失败。
-确定性检查里出现 FAIL 时，pass 必须为 false，不许多解释。"""
+确定性检查里出现 FAIL 时，pass 必须为 false，不许多解释。
+只按上面的验收标准判断，不许自行添加任务里没有的路径、目录或格式要求；
+证据不足时判 pass=false 并写明缺哪条标准，不要编造缺口。"""
 
 _JSON_HINT = re.compile(r"\{.*\}", re.S)
 
@@ -100,12 +103,14 @@ class Pipeline:
         agent: Any,
         max_atoms: int = 6,
         atom_steps: int = 4,
+        deadline_seconds: float = 240.0,
         repair_rounds: int = 1,
         context_limit: int = 800,
     ) -> None:
         self.agent = agent
         self.max_atoms = max(1, int(max_atoms))
         self.atom_steps = max(1, int(atom_steps))
+        self.deadline_seconds = float(deadline_seconds)
         self.repair_rounds = max(0, int(repair_rounds))
         self.context_limit = max(200, int(context_limit))
         # 本步执行中实际调用了多少次工具，用于判断"拆了但没干活"的降级情形
@@ -120,6 +125,7 @@ class Pipeline:
     ) -> dict[str, Any] | None:
         """返回结果字典；拆解失败返回 None，让调用方回落到常规则循环。"""
         agent = self.agent
+        started = time.monotonic()
         plan = await self._plan(task, session_id)
         if plan is None or not plan.get("steps"):
             return None
@@ -148,6 +154,11 @@ class Pipeline:
             if agent.usage.exceeded():
                 return await self._finish(
                     task, session_id, goal, outputs, "incomplete", agent.usage.exceeded() or "", steps_run, None, on_event
+                )
+            if time.monotonic() - started > self.deadline_seconds:
+                return await self._finish(
+                    task, session_id, goal, outputs, "incomplete",
+                    f"超过整体时限 {self.deadline_seconds:.0f}s，已停止", steps_run, None, on_event,
                 )
             objective = str(step.get("objective") or "").strip()
             if not objective:
@@ -248,7 +259,7 @@ class Pipeline:
             },
             {"role": "user", "content": f"任务背景：{task}\n只执行当前步骤。"},
         ]
-        tools = agent.registry.openai_tools()
+        tools = agent._available_tools()
         last = ""
         last_tool = ""
         for _ in range(self.atom_steps):
@@ -332,6 +343,20 @@ class Pipeline:
         ]
         reply = await self.agent._complete(messages, [], session_id)
         data = _parse_json(str(reply.get("content") or "")) or {}
+        if not data:
+            # 核验器没按 JSON 输出时再问一次，别把"解析失败"当成"核验通过/无问题"
+            messages.append({"role": "assistant", "content": str(reply.get("content") or "")})
+            messages.append({"role": "user", "content": "只输出 JSON：{\"pass\": true|false, \"issues\": [...]}"})
+            reply = await self.agent._complete(messages, [], session_id)
+            data = _parse_json(str(reply.get("content") or "")) or {}
+        if not data:
+            hard = summarize(checks)
+            return {
+                "pass": False,
+                "issues": hard["issues"] + ["核验器输出无法解析（两次），按未通过处理"],
+                "checks": checks,
+                "raw": str(reply.get("content") or ""),
+            }
         issues = data.get("issues")
         model_issues = [str(item) for item in issues] if isinstance(issues, list) else []
         passed = bool(data.get("pass")) and hard["pass"]
@@ -346,6 +371,11 @@ class Pipeline:
     def _artifact_checks(self, plan: dict[str, Any], outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """拆解里声明了产物路径就查文件；执行器说写了文件也回查磁盘。"""
         checks: list[dict[str, Any]] = []
+        claimed = set()
+        for item in outputs:
+            output = str(item.get("output") or "")
+            if claims_write(output):
+                claimed.update(paths_in(output))
         for step in plan.get("steps") or []:
             if not isinstance(step, dict):
                 continue
@@ -354,11 +384,19 @@ class Pipeline:
                 for path in paths_in(declared) or [declared.strip()]:
                     target = Path(path).expanduser()
                     # 只查落在本机、且父目录存在的路径，避免把编造路径当失败原因
+                    if str(target) in claimed:
+                        continue
                     if target.is_absolute() and target.parent.is_dir():
-                        checks.append(check_file(target))
+                        # 拆解器的声明只是线索，文件没落地不一定说明执行错，交给核验员看
+                        checks.append(check_file(target, hard=False))
                     elif target.is_absolute():
                         checks.append(
-                            {"name": f"file:{target.name}", "ok": False, "detail": f"父目录不存在：{target.parent}"}
+                            {
+                                "name": f"file:{target.name}",
+                                "ok": False,
+                                "detail": f"父目录不存在：{target.parent}",
+                                "hard": False,
+                            }
                         )
         checks.extend(check_claimed_paths(outputs))
         return checks

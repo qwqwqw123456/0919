@@ -34,7 +34,7 @@
     {"id": "tool-05", "stratum": "simple_tool", "task": "当前登录用户名是什么？只回答用户名。",
      "accept": {"contains": ["user"], "max_calls": 3}, "note": "whoami"},
     {"id": "tool-06", "stratum": "simple_tool", "task": "当前磁盘可用空间是多少？只回答数字带单位。",
-     "accept": {"regex": "\\d+(\\.\\d+)?\\s*(G|M|K|T)", "max_calls": 3}, "note": "df 查询"},
+     "accept": {"regex": "\\d+(\\.\\d+)?\\s*(K|M|G|T)(i?B)?", "max_calls": 3}, "note": "df 查询"},
     {"id": "tool-07", "stratum": "simple_tool", "task": "现在几点？只回答 HH:MM。",
      "accept": {"regex": "\\d{1,2}:\\d{2}"}, "note": "时间查询"},
     {"id": "tool-08", "stratum": "simple_tool", "task": "环境变量 HOME 的值是什么？只回答路径。",

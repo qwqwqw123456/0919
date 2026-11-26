@@ -217,6 +217,7 @@ class Runtime:
                 max_atoms=config.pipeline_max_atoms,
                 atom_steps=config.pipeline_atom_steps,
                 repair_rounds=config.pipeline_repair_rounds,
+                deadline_seconds=config.pipeline_deadline_seconds,
             )
         return cls(
             config=config,
@@ -304,6 +305,7 @@ class Runtime:
                 max_atoms=self.config.pipeline_max_atoms,
                 atom_steps=self.config.pipeline_atom_steps,
                 repair_rounds=self.config.pipeline_repair_rounds,
+                deadline_seconds=self.config.pipeline_deadline_seconds,
             )
         return spawned
 

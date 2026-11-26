@@ -293,6 +293,7 @@ class Agent:
         self.planner = planner
         self.usage = usage or UsageMeter()
         self.sample_rate = sample_rate
+        self._denied_tools: set[str] = set()
         # 进程级累计计量（只做统计，不设预算），用于控制台 /api/metrics 汇总。
         self.total_usage = total_usage
         self.profile = profile
@@ -558,6 +559,7 @@ class Agent:
         - 其余或拿不准：流水线（拆解 → 逐原子执行 → 独立核验 → 定点修复一次）
         - 带图片：直接单循环，拆解只看文本会丢图
         """
+        self._denied_tools = set()
         if self.pipeline is None:
             self._route = {"decision": "single", "reason": "未启用流水线", "risk": False}
             return self._with_route(
@@ -628,6 +630,16 @@ class Agent:
             self.audit.append(session_id, "route", **route)
         return result
 
+    def _available_tools(self) -> list[dict[str, Any]]:
+        """已被权限门拒绝的工具本次不再下发给模型，防止反复重试烧调用。"""
+        tools = self.registry.openai_tools()
+        if not self._denied_tools:
+            return tools
+        return [
+            item for item in tools
+            if item.get("function", {}).get("name") not in self._denied_tools
+        ]
+
     async def _run_loop(
         self,
         task: str,
@@ -670,7 +682,7 @@ class Agent:
             messages.append(user_message)
             self.sessions.append_message(session_id, 0, user_message)
 
-        tools = self.registry.openai_tools()
+        tools = self._available_tools()
         checkpoint = self.sessions.latest_checkpoint(session_id)
         step = int(checkpoint["step"]) if checkpoint else 0
         answer = ""
@@ -1000,7 +1012,15 @@ class Agent:
             reason=decision.reason,
         )
         if not decision.allowed:
-            return ToolResult(call_id=call_id, ok=False, error=f"permission denied: {decision.reason}")
+            self._denied_tools.add(spec.name)
+            return ToolResult(
+                call_id=call_id,
+                ok=False,
+                error=(
+                    f"permission denied: {decision.reason}（本次运行已禁用 {spec.name}，"
+                    "不要重试；改用其他工具，或把多步操作合并成一次脚本执行）"
+                ),
+            )
 
         args_hash = ToolJournal.key(spec.name, arguments)
         replayable = spec.idempotent and spec.risk in (Risk.READ, Risk.REVERSIBLE)
