@@ -99,6 +99,68 @@ def _collect_run_usage(runs_dir: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _model_command(args: argparse.Namespace, cfg: Config) -> int:
+    import asyncio
+
+    from doubao_agent.core import model_channels as mc
+
+    rows = mc.channels(cfg)
+    action = args.action
+
+    if action == "list":
+        if not rows:
+            print("没有配置任何模型通道")
+            return 0
+        for row in rows:
+            mark = "*" if row.get("current") else " "
+            key = mc.mask_key(mc.resolve_key(row))
+            print(
+                f"{mark} {row['name']:<10} {row.get('model') or '-':<26} "
+                f"{row.get('base_url') or '-':<44} key={key}"
+            )
+        print("\n* 为当前主通道；切通道：doubao-agent model use <name>")
+        return 0
+
+    if action == "use":
+        if not args.name:
+            print("用法：doubao-agent model use <name>")
+            return 2
+        try:
+            info = mc.switch_channel(cfg.config_path, args.name)
+        except KeyError as exc:
+            print(str(exc))
+            return 2
+        print(f"已切主通道：{info['to']}（model={info['model']}，旧主通道转 fallback={info['fallback']}）")
+        return 0
+
+    channel = mc.find_channel(cfg, args.name) if args.name else mc.find_channel(cfg, "main")
+    if not channel:
+        print(f"找不到通道：{args.name}")
+        return 2
+
+    if action in ("models", "probe"):
+        if action == "models":
+            try:
+                names = asyncio.run(mc.list_models(channel))
+            except Exception as exc:  # noqa: BLE001 - 如实报错
+                print(f"拉取模型列表失败：{exc}")
+                return 1
+            print(f"通道 {channel['name']} 可用模型 {len(names)} 个：")
+            for name in names:
+                print("  " + name)
+            return 0
+        result = asyncio.run(mc.probe(channel, args.set_model))
+        if result.get("ok"):
+            print(
+                f"通道 {channel['name']} 探活通过｜model={result['model']}"
+                f"｜延迟 {result['latency_s']}s｜回复：{result.get('reply') or '(空)'}"
+            )
+            return 0
+        print(f"通道 {channel['name']} 探活失败：{result.get('error')}")
+        return 1
+    return 2
+
+
 def _usage_command(args: argparse.Namespace, cfg: Config) -> int:
     """累计额度视图：已用 token / 余额，防止总额度被无声耗尽。"""
     quota = max(0, int(args.quota))
@@ -1171,6 +1233,11 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser.add_argument("session", nargs="?", default=None, help="只校验指定会话")
     audit_parser.add_argument("--out", default=None, help="导出路径（默认 runs/<session>/audit.export.jsonl）")
 
+    model_parser = sub.add_parser("model", help="模型通道：list / use / probe / models")
+    model_parser.add_argument("action", choices=["list", "use", "probe", "models"], help="动作")
+    model_parser.add_argument("name", nargs="?", default=None, help="通道名（use/probe/models）")
+    model_parser.add_argument("--set-model", default=None, help="探活时临时指定模型名")
+
     calibrate_parser = sub.add_parser("calibrate", help="分流标定：样本门控 + 离线回放候选阈值")
     calibrate_parser.add_argument("--replay", action="store_true", help="跑候选阈值回放")
     calibrate_parser.add_argument("--chars", default=None, help="候选字符阈值，逗号分隔")
@@ -1200,6 +1267,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "evolve":
         return _evolve_command(args, cfg)
+
+    if args.cmd == "model":
+        return _model_command(args, cfg)
 
     if args.cmd == "calibrate":
         from doubao_agent.core.calibration import main as calibrate_main

@@ -120,6 +120,7 @@ class Config:
     a2a_allow: list[str] = field(default_factory=lambda: ["127.0.0.1", "localhost", "::1"])  # A2A 出站白名单
     model: dict[str, Any] = field(default_factory=dict)
     model_fallback: dict[str, Any] = field(default_factory=dict)  # 备用真实 provider 配置，结构同 model；空=不启用
+    models: list[dict[str, Any]] = field(default_factory=list)     # 可选通道清单，供 model use 快切
     bridge: dict[str, Any] = field(default_factory=dict)
     outbound: dict[str, Any] = field(default_factory=dict)  # 出站通道：console / feishu / smtp
     secret_sources: dict[str, str] = field(default_factory=dict)  # 兜底补进来的变量 -> 来源（不含值）
@@ -278,6 +279,7 @@ def load_config(path: str | Path | None = None) -> Config:
             cfg.a2a_allow = [str(x).strip() for x in allow if str(x).strip()]
         cfg.model = dict(data.get("model") or _default_model())
         cfg.model_fallback = dict(data.get("model_fallback") or {})
+        cfg.models = [x for x in (data.get("models") or []) if isinstance(x, dict) and x.get("name")]
         cfg.bridge = dict(data.get("bridge") or {})
         cfg.embedding = dict(data.get("embedding") or {})
         cfg.auto_approve = [
