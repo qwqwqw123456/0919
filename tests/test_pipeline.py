@@ -148,3 +148,21 @@ async def test_existing_declared_artifact_passes(tmp_path) -> None:
 
     assert result["status"] == "completed"
     assert all(item["ok"] for item in result["pipeline"]["checks"])
+
+
+async def test_blocked_atom_with_passing_verdict_counts_completed(tmp_path) -> None:
+    plan = (
+        '{"goal":"写结论","criteria":["结论里写明 4","结论与计算一致"],'
+        '"steps":[{"id":"s1","objective":"先算 2+2"},{"id":"s2","objective":"补一句废话"}]}'
+    )
+    agent = await _agent(
+        tmp_path,
+        [
+            _reply(plan),
+            _reply("STEP_DONE: 4"),
+            _reply("STEP_BLOCKED: 缺材料"),
+            _reply('{"pass": true, "issues": []}'),
+        ],
+    )
+    result = await agent.run("先算 2+2，然后核对结果并给结论")
+    assert result["status"] == "completed"

@@ -155,6 +155,6 @@ def format_evidence(checks: Iterable[dict[str, Any]]) -> str:
     if not items:
         return "-（无确定性检查）"
     return "\n".join(
-        f"- {'PASS' if c['ok'] else ('FAIL' if c.get('hard', True) else 'WARN')} {c['name']}: {c['detail']}"
+        f"- {'通过' if c['ok'] else ('未通过' if c.get('hard', True) else '提示')} {c['name']}: {c['detail']}"
         for c in items
     )

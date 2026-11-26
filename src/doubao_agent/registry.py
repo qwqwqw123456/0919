@@ -113,14 +113,21 @@ class CapabilityRegistry:
     async def _invoke(
         self, source: CapabilitySource, original: str, call: ToolCall
     ) -> ToolResult:
-        return await source.call_tool(
-            ToolCall(
-                name=original,
-                arguments=call.arguments,
-                call_id=call.call_id,
-                cancel_event=call.cancel_event,
+        try:
+            return await source.call_tool(
+                ToolCall(
+                    name=original,
+                    arguments=call.arguments,
+                    call_id=call.call_id,
+                    cancel_event=call.cancel_event,
+                )
             )
-        )
+        except Exception as exc:  # noqa: BLE001 - 工具异常必须变成工具结果，不许带崩整轮
+            return ToolResult(
+                call_id=call.call_id,
+                ok=False,
+                error=f"工具执行异常 {type(exc).__name__}: {exc}",
+            )
 
     def _semaphore_for(self, source_name: str) -> asyncio.Semaphore | None:
         if self._channel_concurrency <= 0:

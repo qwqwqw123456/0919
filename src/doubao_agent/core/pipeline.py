@@ -54,7 +54,7 @@ VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，�
 验收标准：
 {criteria}
 
-工具实测的确定性检查（比文字更可信，FAIL 就是 FAIL）：
+工具实测的确定性检查（比文字更可信）：标“未通过”的才算硬失败，标“提示”的只作参考，不能据此判失败。
 {evidence}
 
 各步产物：
@@ -65,7 +65,7 @@ VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，�
 判定以最终产物是否满足标准为准：执行器已在步骤里给出的工具返回即视为证据，
 不要要求它再证明"调用发生过"；某步标 STEP_BLOCKED 但整体产物已满足标准时判 pass。
 没有确凿证据指出问题就 pass=true，不要因为"可能不够完美"判失败。
-确定性检查里出现 FAIL 时，pass 必须为 false，不许多解释。
+确定性检查里出现“未通过”时，pass 必须为 false，不许多解释；只有“提示”时按验收标准正常判断。
 只按上面的验收标准判断，不许自行添加任务里没有的路径、目录或格式要求；
 证据不足时判 pass=false 并写明缺哪条标准，不要编造缺口。"""
 
@@ -234,7 +234,8 @@ class Pipeline:
                 session_id, "verify", pass_=verdict["pass"], issues=verdict["issues"], round=rounds
             )
 
-        status = "completed" if verdict["pass"] and not blocked else "incomplete"
+        # 核验通过就是通过：个别步骤标 BLOCKED 但整体满足标准时，不再一刀切判 incomplete
+        status = "completed" if verdict["pass"] else "incomplete"
         answer = self._compose(goal, outputs, verdict)
         return await self._finish(
             task, session_id, goal, outputs, status, answer, steps_run, verdict, on_event
