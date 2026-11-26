@@ -1082,7 +1082,10 @@ class Agent:
         max_attempts = 1 + (self.tool_retries if spec.idempotent else 0)
         while True:
             attempts += 1
-            result = await self.registry.call(call, use_cache=use_cache)
+            try:
+                result = await self.registry.call(call, use_cache=use_cache)
+            except Exception as exc:  # noqa: BLE001 - 工具侧异常不能带崩整条任务
+                result = ToolResult(call_id=call_id, ok=False, error=f"{type(exc).__name__}: {exc}")
             if (
                 result.ok
                 or attempts >= max_attempts
