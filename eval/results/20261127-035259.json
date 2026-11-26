@@ -1,0 +1,48 @@
+{
+  "total": 2,
+  "pass": 2,
+  "pass_rate": 1.0,
+  "tokens": 24698,
+  "by_stratum": {
+    "simple_tool": {
+      "total": 1,
+      "pass": 1,
+      "rate": 1.0
+    },
+    "multi_step": {
+      "total": 1,
+      "pass": 1,
+      "rate": 1.0
+    }
+  },
+  "rows": [
+    {
+      "id": "tool-06",
+      "stratum": "simple_tool",
+      "task": "当前磁盘可用空间是多少？只回答数字带单位。",
+      "status": "completed",
+      "route": "single",
+      "verified": null,
+      "calls": 2,
+      "tokens": 12640,
+      "seconds": 6.2,
+      "pass": true,
+      "issues": [],
+      "answer": "10278100992 字节（约 10.28 GB）"
+    },
+    {
+      "id": "multi-07",
+      "stratum": "multi_step",
+      "task": "比较 3^10 和 2^15 哪个大，把结论和两个数值一起写入 /home/user/agent-state/eval-workspace/compare.md，再核对结论与数值一致。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 4,
+      "tokens": 12058,
+      "seconds": 24.2,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：将 3^10 与 2^15 的大小比较结论及两个具体数值写入 /home/user/agent-state/eval-workspace/compare.md\n\n[s1] STEP_DONE: 3^10 = 59049，2^15 = 32768，3^10 > 2^15（差值 26281）；已写入并回读核对 /home/user/agent-state/eval-workspace/compare.md，数值与结论一致\n\n核验：通过"
+    }
+  ]
+}
