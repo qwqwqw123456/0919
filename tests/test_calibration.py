@@ -92,7 +92,7 @@ def test_replay_flags_false_deescalation_only_for_escalated(tmp_path: Path) -> N
     assert row["correct_upgrade"] == 1   # s1：单循环失败，回放也判流水线，判对
     assert row["false_escalation"] == 1  # s2：单循环已完成，回放却判流水线，属误升级
     assert row["false_deescalation"] == 0
-    assert row["needs_shadow"] == 0
+    assert row["undecided"] == 0
 
 
 def test_replay_counts_false_escalation(tmp_path: Path) -> None:

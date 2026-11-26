@@ -150,7 +150,8 @@ def replay(rows: list[dict[str, Any]], candidates: Iterable[int] = CANDIDATE_CHA
     - actual single 且 completed，新规则判 pipeline → 误升级（浪费核验成本）
     - actual single 且 escalated（说明单循环确实扛不住），新规则判 pipeline → 该升（正确）
     - 同上但新规则仍判 single → 误降级（危险）
-    - actual pipeline，新规则判 single → 待影子验证（本日志不足以判定）
+    - actual pipeline，新规则判 single → 未判定：日志里看不出单循环能不能做，
+      归为未判定、统计单列；不做双跑，不额外调模型，也不开第二套执行链路
     """
     usable = [r for r in rows if (r.get("task") or "").strip()]
     table: list[dict[str, Any]] = []
@@ -158,7 +159,7 @@ def replay(rows: list[dict[str, Any]], candidates: Iterable[int] = CANDIDATE_CHA
         false_escalation = 0
         false_deescalation = 0
         correct_upgrade = 0
-        shadow = 0
+        undecided = 0
         agree = 0
         for row in usable:
             new_route = decide_route(row["task"], max_simple_chars=chars)["route"]
@@ -173,7 +174,7 @@ def replay(rows: list[dict[str, Any]], candidates: Iterable[int] = CANDIDATE_CHA
             elif row.get("escalated"):
                 false_deescalation += 1
             else:
-                shadow += 1
+                undecided += 1
         table.append(
             {
                 "max_simple_chars": chars,
@@ -182,7 +183,7 @@ def replay(rows: list[dict[str, Any]], candidates: Iterable[int] = CANDIDATE_CHA
                 "false_escalation": false_escalation,
                 "false_deescalation": false_deescalation,
                 "correct_upgrade": correct_upgrade,
-                "needs_shadow": shadow,
+                "undecided": undecided,
             }
         )
     return table
@@ -208,15 +209,15 @@ def _print_report(payload: dict[str, Any]) -> None:
         )
     if payload.get("replay"):
         print("\n离线回放（候选入口阈值）：")
-        print("  阈值  可用  一致  该升  误升  误降  待影子")
+        print("  阈值  可用  一致  该升  误升  误降  未判定")
         for row in payload["replay"]:
             print(
                 f"  {row['max_simple_chars']:>3}字 {row['usable']:>5} {row['agree']:>5}"
                 f" {row['correct_upgrade']:>5} {row['false_escalation']:>5}"
-                f" {row['false_deescalation']:>5} {row['needs_shadow']:>6}"
+                f" {row['false_deescalation']:>5} {row['undecided']:>6}"
             )
         print("  说明：误降级只统计“实际单循环已升级”的样本，最危险；"
-              "待影子需真跑一次才能判定。")
+              "未判定只是日志里看不出来，不做双跑、不额外花 token。")
 
 
 def main(argv: list[str] | None = None) -> int:
