@@ -85,38 +85,51 @@ async def run_tasks(
     workspace: Path,
     timeout: float = 240.0,
     on_case: Any = None,
+    concurrency: int = 4,
 ) -> dict[str, Any]:
+    """每条用例独立工作区、独立 Agent，按并发窗口跑，互不干扰。"""
     rows: list[dict[str, Any]] = []
-    for case in cases:
-        task_text = str(case["task"]).replace("{ws}", str(workspace))
-        started = time.time()
-        try:
-            result = await asyncio.wait_for(runtime.start_run(task_text), timeout=timeout)
-        except asyncio.TimeoutError:
-            result = {"status": "timeout", "answer": "", "usage": {}, "route": {}}
-        except Exception as exc:  # noqa: BLE001 - 单条崩溃不能带崩整批评测
-            result = {"status": f"error: {type(exc).__name__}", "answer": "", "usage": {}, "route": {}}
-        elapsed = round(time.time() - started, 1)
-        verdict = evaluate(case, result, workspace)
-        route = result.get("route") or {}
-        row = {
-            "id": case["id"],
-            "stratum": case.get("stratum"),
-            "task": task_text,
-            "status": result.get("status"),
-            "route": route.get("decision"),
-            "verified": route.get("verify_pass"),
-            "calls": (result.get("usage") or {}).get("calls"),
-            "tokens": (result.get("usage") or {}).get("total_tokens"),
-            "seconds": elapsed,
-            "pass": verdict["pass"],
-            "issues": verdict["issues"],
-            "answer": str(result.get("answer") or "")[:400],
-        }
-        rows.append(row)
-        if on_case:
-            on_case(row)
+    sem = asyncio.Semaphore(max(1, concurrency))
 
+    def sub_workspace(case: dict[str, Any]) -> Path:
+        target = workspace / str(case["id"])
+        prepare_workspace(str(target))
+        return target
+
+    async def one(case: dict[str, Any]) -> None:
+        async with sem:
+            case_ws = sub_workspace(case)
+            task_text = str(case["task"]).replace("{ws}", str(case_ws))
+            started = time.time()
+            try:
+                result = await asyncio.wait_for(runtime.start_run(task_text), timeout=timeout)
+            except asyncio.TimeoutError:
+                result = {"status": "timeout", "answer": "", "usage": {}, "route": {}}
+            except Exception as exc:  # noqa: BLE001 - 单条崩溃不能带崩整批评测
+                result = {"status": f"error: {type(exc).__name__}", "answer": "", "usage": {}, "route": {}}
+            elapsed = round(time.time() - started, 1)
+            verdict = evaluate(case, result, case_ws)
+            route = result.get("route") or {}
+            row = {
+                "id": case["id"],
+                "stratum": case.get("stratum"),
+                "task": task_text,
+                "status": result.get("status"),
+                "route": route.get("decision"),
+                "verified": route.get("verify_pass"),
+                "calls": (result.get("usage") or {}).get("calls"),
+                "tokens": (result.get("usage") or {}).get("total_tokens"),
+                "seconds": elapsed,
+                "pass": verdict["pass"],
+                "issues": verdict["issues"],
+                "answer": str(result.get("answer") or "")[:400],
+            }
+            rows.append(row)
+            if on_case:
+                on_case(row)
+
+    await asyncio.gather(*(one(case) for case in cases))
+    rows.sort(key=lambda r: str(r["id"]))
     by_stratum: dict[str, dict[str, int]] = {}
     for row in rows:
         bucket = by_stratum.setdefault(row["stratum"], {"total": 0, "pass": 0})

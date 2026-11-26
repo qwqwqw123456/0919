@@ -950,7 +950,10 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
                     + (f"\n     问题：{'；'.join(row['issues'])}" if row["issues"] else "")
                 )
 
-            report = await run_tasks(runtime, cases, workspace, timeout=args.timeout, on_case=_show)
+            report = await run_tasks(
+                runtime, cases, workspace, timeout=args.timeout, on_case=_show,
+                concurrency=max(1, int(args.concurrency)),
+            )
             target = save_report(report)
             if args.json:
                 print(json.dumps({k: v for k, v in report.items() if k != "rows"}, ensure_ascii=False, indent=2))
@@ -1289,6 +1292,7 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--ids", default=None, help="指定用例 id，逗号分隔")
     eval_parser.add_argument("--timeout", type=float, default=240.0, help="单条超时秒数")
     eval_parser.add_argument("--json", action="store_true", help="打印 JSON 汇总")
+    eval_parser.add_argument("--concurrency", type=int, default=4, help="并发条数（默认 4，1 为串行）")
 
     calibrate_parser = sub.add_parser("calibrate", help="分流标定：样本门控 + 离线回放候选阈值")
     calibrate_parser.add_argument("--replay", action="store_true", help="跑候选阈值回放")
