@@ -225,7 +225,7 @@ class Pipeline:
                 return await self._finish(
                     task, session_id, goal, outputs, "incomplete", agent.usage.exceeded() or "", steps_run, None, on_event
                 )
-            if time.monotonic() - started > self.deadline_seconds:
+            if self.deadline_seconds > 0 and time.monotonic() - started > self.deadline_seconds:
                 return await self._finish(
                     task, session_id, goal, outputs, "incomplete",
                     f"超过整体时限 {self.deadline_seconds:.0f}s，已停止", steps_run, None, on_event,
@@ -247,7 +247,7 @@ class Pipeline:
             await agent._emit(on_event, {"type": "atom_end", "atom": index, "blocked": blocked})
 
             # 时限预算：本步跑完已经吃掉大半时限，就不再核验/修复，直接如实收尾
-            if time.monotonic() - started > self.deadline_seconds * 0.75:
+            if self.deadline_seconds > 0 and time.monotonic() - started > self.deadline_seconds * 0.75:
                 agent.audit.append(session_id, "deadline_stop", atoms=len(outputs))
                 return await self._finish(
                     task, session_id, goal, outputs, "incomplete",

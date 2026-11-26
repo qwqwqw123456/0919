@@ -17,6 +17,7 @@ pipeline:
   max_atoms: 6        # 最多拆几个原子步骤
   atom_steps: 4       # 单步最多几轮模型/工具往返
   repair_rounds: 1    # 核验未通过时最多修几轮
+  deadline_seconds: 0  # 0=不限；用户口径：不设时限闸
   sample_rate: 0.1    # 分流标定采样率：按此比例落任务原文供离线回放
 planning:
   # 默认关：开启后每个任务先串一次模型做计划，简单任务纯多一次往返，
@@ -26,8 +27,8 @@ skills_dir: /home/user/agent-state/skills
 context_limit: 40
 scheduler_enabled: true
 scheduler_interval: 30
-max_steps: 40
-max_calls: 200       # 单次运行模型调用预算，0=不限；防跑飞
+max_steps: 0          # 0=不限；用户口径：不设步数闸
+max_calls: 0         # 0=不限；用户口径：不做预算硬闸
 max_tokens: 0  # 0=不限；用户口径：token 不做限制
 repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数
 tool_retries: 1     # 幂等工具遇到瞬时错误时的重试次数（0=不重试）

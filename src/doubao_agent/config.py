@@ -260,7 +260,7 @@ def load_config(path: str | Path | None = None) -> Config:
                 0, int(pipeline.get("repair_rounds", cfg.pipeline_repair_rounds))
             )
             cfg.pipeline_deadline_seconds = max(
-                30.0, float(pipeline.get("deadline_seconds", cfg.pipeline_deadline_seconds))
+                0.0, float(pipeline.get("deadline_seconds", cfg.pipeline_deadline_seconds))
             )
             cfg.calibration_sample_rate = min(
                 1.0, max(0.0, float(pipeline.get("sample_rate", cfg.calibration_sample_rate)))
