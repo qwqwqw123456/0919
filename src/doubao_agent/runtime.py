@@ -207,6 +207,7 @@ class Runtime:
             journal=journal,
             telemetry=telemetry,
             tool_retries=config.tool_retries,
+            skills=skills,
         )
         return cls(
             config=config,
@@ -285,6 +286,7 @@ class Runtime:
             telemetry=self.telemetry,
             tool_retries=self.config.tool_retries,
             profile=self.profile,
+            skills=self.skills,
         )
 
     @staticmethod

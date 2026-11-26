@@ -276,6 +276,7 @@ class Agent:
         tool_retries: int = 1,
         total_usage: UsageMeter | None = None,
         profile: Any = None,
+        skills: Any = None,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -291,6 +292,8 @@ class Agent:
         # 进程级累计计量（只做统计，不设预算），用于控制台 /api/metrics 汇总。
         self.total_usage = total_usage
         self.profile = profile
+        # 技能库：只用于按任务关键词做本地匹配，把命中的技能名与会话级提示注入提示词。
+        self.skills = skills
         self.context_limit = context_limit
         self.working = working
         self.repair_rounds = repair_rounds
@@ -411,9 +414,35 @@ class Agent:
                 f"- [{labels.get(item['kind'], item['kind'])}] {item['text']}" for item in recalled
             )
             sections.append(f"相关长期记忆：\n{lines}")
+        skill_hint = self._skill_hint(task)
+        if skill_hint:
+            sections.append(skill_hint)
         if not sections:
             return SYSTEM_PROMPT
         return SYSTEM_PROMPT + "\n\n" + "\n\n".join(sections)
+
+    def _skill_hint(self, task: str) -> str:
+        """按任务关键词本地匹配技能，命中名单注入提示词；正文仍由 skill.read 按需加载。
+
+        纯本地关键词匹配，不额外产生模型调用；匹配不到就不注入，避免提示词膨胀。
+        """
+        if self.skills is None:
+            return ""
+        try:
+            matched = self.skills.match(task, limit=5)
+        except Exception:  # noqa: BLE001 - 技能提示是旁路，失败不影响主流程
+            return ""
+        if not matched:
+            return ""
+        lines = []
+        for skill in matched:
+            desc = str(getattr(skill, "description", "") or "").strip().splitlines()
+            first = desc[0][:70] if desc else ""
+            lines.append(f"- {skill.name}：{first}")
+        return (
+            "可能用到的技能（先判断是否切题，切题时调用 skill.read 取全文按说明执行）：\n"
+            + "\n".join(lines)
+        )
 
     def _memory_context_text(self, task: str) -> str:
         parts: list[str] = []

@@ -64,6 +64,7 @@ doubao-agent knowledge domains
 doubao-agent memory decay --days 30     # 按半衰期衰减非偏好记忆
 doubao-agent metrics [--session <ID>] [--detail]  # span 汇总 / 明细、慢调用、失败数
 doubao-agent audit verify [会话ID] | audit sessions | audit export <会话ID>
+doubao-agent usage [--quota 10000000] [--detail]  # 累计 token 用量与额度余额
 doubao-agent parallel "任务" --review    # 并行执行 + 审阅者合并仲裁
 doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765 且仅绑本机
 ```

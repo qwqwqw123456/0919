@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import glob
 import json
 import os
 import signal
@@ -23,6 +24,7 @@ from .core.outbound import redact
 from .core.profile import ProfileStore
 from .mcp_server import serve, serve_http
 from .runtime import Runtime
+from .skills import SkillManager
 from .types import ToolCall, ToolSpec
 
 
@@ -62,6 +64,62 @@ def _usage_line(result: dict[str, Any]) -> str:
     return f"调用={usage.get('calls', 0)} tokens={usage.get('total_tokens', 0)}"
 
 
+def _collect_run_usage(runs_dir: str) -> list[dict[str, Any]]:
+    """按会话汇总 token 用量：取每个会话最后一条带 usage 的 finish。
+
+    续跑会在同一会话追加多条 finish，取最后一条即本轮真实累计，不重复计。
+    数据来自审计流水，已脱敏，不含凭据。
+    """
+    rows: list[dict[str, Any]] = []
+    for path in glob.glob(os.path.join(runs_dir, "*", "audit.jsonl")):
+        session = os.path.basename(os.path.dirname(path))
+        task = ""
+        usage = None
+        stamp = ""
+        for line in open(path, encoding="utf-8"):
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("event") == "start":
+                task = str(event.get("task") or "")
+            elif event.get("event") == "finish" and event.get("usage"):
+                usage = event["usage"]
+                stamp = str(event.get("ts") or "")
+        if usage:
+            rows.append(
+                {
+                    "session": session,
+                    "task": task,
+                    "ts": stamp,
+                    "calls": int(usage.get("calls") or 0),
+                    "tokens": int(usage.get("total_tokens") or 0),
+                }
+            )
+    return rows
+
+
+def _usage_command(args: argparse.Namespace, cfg: Config) -> int:
+    """累计额度视图：已用 token / 余额，防止总额度被无声耗尽。"""
+    quota = max(0, int(args.quota))
+    rows = _collect_run_usage(str(cfg.runs_dir))
+    used = sum(r["tokens"] for r in rows)
+    calls = sum(r["calls"] for r in rows)
+    left = quota - used
+    pct = (used / quota * 100) if quota else 0.0
+    print(f"会话 {len(rows)} 个 ｜ 调用 {calls} 次 ｜ 已用 {used:,} token")
+    if quota:
+        print(f"总额度 {quota:,} ｜ 剩余 {left:,} ｜ 已用 {pct:.1f}%")
+    if args.detail and rows:
+        print("\n【按消耗排序（前 5）】")
+        for row in sorted(rows, key=lambda r: -r["tokens"])[:5]:
+            task = (row["task"][:28] + "…") if len(row["task"]) > 28 else (row["task"] or "（无记录）")
+            print(f"  {row['session']}  {row['tokens']:>9,}  {task}")
+    if quota and left <= 0:
+        print("额度已耗尽：需补充额度或临时换通道，别再跑长任务")
+    return 0
+
+
 def _evolve_command(args: argparse.Namespace, cfg: Config) -> int:
     """自进化命令组：读用量、跑生命周期、蒸馏配方。只改状态位，不删技能文件。"""
     if not cfg.evolution_enabled:
@@ -75,13 +133,15 @@ def _evolve_command(args: argparse.Namespace, cfg: Config) -> int:
     try:
         if args.action == "status":
             data = store.status(top=args.top)
+            installed = SkillManager(cfg.skills_dir).refresh()
             print(
-                f"技能 {data['total']} 个 ｜ active {data['state_counts']['active']} / "
+                f"已装技能 {installed} 个（skills_dir）｜ 有用量记账 {data['total']} 个"
+                f" ｜ active {data['state_counts']['active']} / "
                 f"stale {data['state_counts']['stale']} / archived {data['state_counts']['archived']} "
                 f"｜ 钉住 {data['pinned']}"
             )
             if not data["total"]:
-                print("（还没有遥测数据：跑一次用到技能的任务后再看）")
+                print(f"（{installed} 个技能均未被执行过：这是没有记账，不等于技能缺失）")
                 return 0
             print("\n【使用排行】")
             if data["top"]:
@@ -1111,6 +1171,10 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser.add_argument("session", nargs="?", default=None, help="只校验指定会话")
     audit_parser.add_argument("--out", default=None, help="导出路径（默认 runs/<session>/audit.export.jsonl）")
 
+    usage_parser = sub.add_parser("usage", help="额度视图：累计 token 用量与总额度余额")
+    usage_parser.add_argument("--quota", type=int, default=10_000_000, help="总额度 token（默认 1000 万）")
+    usage_parser.add_argument("--detail", action="store_true", help="列出消耗最高的会话")
+
     args, extra = parser.parse_known_args(argv)
     if extra and args.cmd in ("memory", "knowledge"):
         # argparse 的已知怪癖：可选参数在前时，位置参数会落进 extra。
@@ -1131,6 +1195,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "evolve":
         return _evolve_command(args, cfg)
+
+    if args.cmd == "usage":
+        return _usage_command(args, cfg)
 
     if args.cmd == "serve":
         try:
