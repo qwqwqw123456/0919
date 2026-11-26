@@ -30,8 +30,8 @@ watch_dirs: []                 # 监听目录，空=工作区；相对路径基�
 watch_interval: 10             # 目录快照轮询间隔（秒）
 watch_task: ""                 # 变更触发任务模板，占位符 {path}/{event}；空=只广播事件不起任务
 watch_suffixes: []            # 只监听这些后缀（如 [".md",".txt"]），空=全部
-max_steps: 12
-max_calls: 80       # 单次运行模型调用预算，0=不限；防跑飞；接真实模型时建议设上限
+max_steps: 40
+max_calls: 300       # 单次运行模型调用预算，0=不限；防跑飞；接真实模型时建议设上限
 max_tokens: 2000000  # 单次运行 token 预算，0=不限；防跑飞
 repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数（0=不重试）
 provider_retries: 1     # 端点异常重试次数；400/401/403/404 不重试，直接进降级判断
