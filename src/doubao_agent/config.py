@@ -93,6 +93,7 @@ class Config:
     pipeline_max_atoms: int = 6        # 流水线最多拆几个原子步骤
     pipeline_atom_steps: int = 4       # 单个原子步骤最多几轮模型/工具往返
     pipeline_repair_rounds: int = 1    # 核验未通过时允许修复的轮数
+    calibration_sample_rate: float = 0.1  # 分流标定采样率：按此比例落任务原文供离线回放
     skills_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("AGENT_SKILLS_DIR") or _default_workspace() / "skills"
@@ -255,6 +256,9 @@ def load_config(path: str | Path | None = None) -> Config:
             cfg.pipeline_atom_steps = max(1, int(pipeline.get("atom_steps", cfg.pipeline_atom_steps)))
             cfg.pipeline_repair_rounds = max(
                 0, int(pipeline.get("repair_rounds", cfg.pipeline_repair_rounds))
+            )
+            cfg.calibration_sample_rate = min(
+                1.0, max(0.0, float(pipeline.get("sample_rate", cfg.calibration_sample_rate)))
             )
         cfg.max_steps = int(data.get("max_steps", cfg.max_steps))
         cfg.max_calls = max(0, int(data.get("max_calls", cfg.max_calls)))

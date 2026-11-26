@@ -21,7 +21,7 @@ from .planner import Plan, Planner
 from .recipe import RecipeStore
 from .session import SessionStore
 from .telemetry import Telemetry
-from .router import decide_route
+from .router import decide_route, is_sampled, stratum_of
 from .usage import UsageMeter
 from .working import WorkingMemory
 
@@ -279,6 +279,7 @@ class Agent:
         profile: Any = None,
         skills: Any = None,
         pipeline: Any = None,
+        sample_rate: float = 0.1,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -291,6 +292,7 @@ class Agent:
         self.record_recipes = record_recipes
         self.planner = planner
         self.usage = usage or UsageMeter()
+        self.sample_rate = sample_rate
         # 进程级累计计量（只做统计，不设预算），用于控制台 /api/metrics 汇总。
         self.total_usage = total_usage
         self.profile = profile
@@ -556,13 +558,17 @@ class Agent:
         - 其余或拿不准：流水线（拆解 → 逐原子执行 → 独立核验 → 定点修复一次）
         - 带图片：直接单循环，拆解只看文本会丢图
         """
-        if self.pipeline is None or images:
-            return await self._run_loop(task, session_id, on_event, images=images)
+        if self.pipeline is None:
+            self._route = {"decision": "single", "reason": "未启用流水线", "risk": False}
+            return self._with_route(
+                await self._run_loop(task, session_id, on_event, images=images), task, bool(images)
+            )
 
-        decision = decide_route(task)
+        decision = decide_route(task, has_image=bool(images))
         self._route = {
             "decision": decision["route"],
             "reason": decision["reason"],
+            "risk": decision.get("risk", False),
             "escalated": False,
             "deescalated": False,
         }
@@ -570,9 +576,11 @@ class Agent:
         if decision["route"] == "pipeline":
             piped = await self.pipeline.run(task, session_id, on_event)
             if piped is not None:
-                return self._with_route(piped)
+                return self._with_route(piped, task, bool(images))
             self._route["reason"] += "；拆解失败，回落单循环"
-            return self._with_route(await self._run_loop(task, session_id, on_event, images=images))
+            return self._with_route(
+                await self._run_loop(task, session_id, on_event, images=images), task, bool(images)
+            )
 
         # 简单任务：预算硬闸，超限或结果不完整就升级，不许在单循环里耗到底
         original = (self.usage.max_calls, self.usage.max_tokens)
@@ -588,27 +596,34 @@ class Agent:
             self._route["reason"] += "；单循环未完成，升级流水线"
             piped = await self.pipeline.run(task, result.get("session_id"), on_event)
             if piped is not None:
-                return self._with_route(piped)
-        return self._with_route(result)
+                return self._with_route(piped, task, bool(images))
+        return self._with_route(result, task, bool(images))
 
-    def _with_route(self, result: dict[str, Any]) -> dict[str, Any]:
-        """把分流结论与成本写进结果与审计，口径固定，便于回归对比。"""
+    def _with_route(self, result: dict[str, Any], task: str = "", has_image: bool = False) -> dict[str, Any]:
+        """把分流结论与成本写进结果与审计，口径固定，便于离线回放与标定。"""
         route = dict(getattr(self, "_route", {"decision": "single", "reason": "未启用分流"}))
         route.setdefault("escalated", False)
         pipeline_info = result.get("pipeline") or {}
         if pipeline_info.get("deescalated"):
             route["deescalated"] = True
         usage = result.get("usage") or {}
+        calls = usage.get("calls")
         route.update(
             {
                 "steps": result.get("steps"),
-                "calls": usage.get("calls"),
+                "calls": calls,
                 "tokens": usage.get("total_tokens"),
                 "verify_pass": pipeline_info.get("verified"),
             }
         )
+        session_id = result.get("session_id") or ""
+        route["stratum"] = stratum_of(route, calls, has_image)
+        route["status"] = result.get("status")
+        # 任务原文按采样率落盘，够离线回放用，又不把全量内容都写进日志
+        if task and is_sampled(session_id, self.sample_rate):
+            route["sampled"] = True
+            route["task"] = task[:300]
         result["route"] = route
-        session_id = result.get("session_id")
         if session_id:
             self.audit.append(session_id, "route", **route)
         return result

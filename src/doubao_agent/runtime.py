@@ -209,6 +209,7 @@ class Runtime:
             telemetry=telemetry,
             tool_retries=config.tool_retries,
             skills=skills,
+            sample_rate=config.calibration_sample_rate,
         )
         if config.pipeline_enabled:
             agent.pipeline = Pipeline(
@@ -295,6 +296,7 @@ class Runtime:
             tool_retries=self.config.tool_retries,
             profile=self.profile,
             skills=self.skills,
+            sample_rate=self.config.calibration_sample_rate,
         )
         if self.config.pipeline_enabled:
             spawned.pipeline = Pipeline(

@@ -1171,6 +1171,11 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser.add_argument("session", nargs="?", default=None, help="只校验指定会话")
     audit_parser.add_argument("--out", default=None, help="导出路径（默认 runs/<session>/audit.export.jsonl）")
 
+    calibrate_parser = sub.add_parser("calibrate", help="分流标定：样本门控 + 离线回放候选阈值")
+    calibrate_parser.add_argument("--replay", action="store_true", help="跑候选阈值回放")
+    calibrate_parser.add_argument("--chars", default=None, help="候选字符阈值，逗号分隔")
+    calibrate_parser.add_argument("--json", action="store_true", help="输出 JSON")
+
     usage_parser = sub.add_parser("usage", help="额度视图：累计 token 用量与总额度余额")
     usage_parser.add_argument("--quota", type=int, default=10_000_000, help="总额度 token（默认 1000 万）")
     usage_parser.add_argument("--detail", action="store_true", help="列出消耗最高的会话")
@@ -1195,6 +1200,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "evolve":
         return _evolve_command(args, cfg)
+
+    if args.cmd == "calibrate":
+        from doubao_agent.core.calibration import main as calibrate_main
+
+        argv = ["--runs-dir", str(cfg.runs_dir)]
+        if getattr(args, "replay", False):
+            argv.append("--replay")
+        if getattr(args, "chars", None):
+            argv += ["--chars", args.chars]
+        if getattr(args, "json", False):
+            argv.append("--json")
+        return calibrate_main(argv)
 
     if args.cmd == "usage":
         return _usage_command(args, cfg)

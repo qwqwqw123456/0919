@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import hashlib
+from typing import Any
+
 # 多步信号：这些词出现，通常意味着一件事里套着另一件事
 MULTI_STEP_WORDS = (
     "然后", "接着", "再", "分别", "对比", "比较", "逐个", "多个", "批量",
@@ -31,12 +34,32 @@ VERIFY_WORDS = ("核验", "核对", "校验", "证据", "引用", "溯源", "验
 
 MAX_SIMPLE_CHARS = 40
 
+# 标定分层：样本门控按这五类各要 ≥30 条
+STRATA = ("simple_qa", "simple_tool", "multi_step", "high_risk", "image")
 
-def decide_route(task: str, max_simple_chars: int = MAX_SIMPLE_CHARS) -> dict[str, str]:
-    """返回 {"route": "single"|"pipeline", "reason": "..."}；不调模型。"""
+STRATUM_LABELS = {
+    "simple_qa": "简单问答",
+    "simple_tool": "简单工具",
+    "multi_step": "多步",
+    "high_risk": "高风险",
+    "image": "图片",
+}
+
+
+def has_risk_signal(task: str) -> bool:
+    text = task or ""
+    return any(word in text for word in RISK_WORDS)
+
+
+def decide_route(
+    task: str,
+    max_simple_chars: int = MAX_SIMPLE_CHARS,
+    has_image: bool = False,
+) -> dict[str, Any]:
+    """返回 {"route": "single"|"pipeline", "reason": "...", "risk": bool}；不调模型。"""
     text = (task or "").strip()
     if not text:
-        return {"route": "single", "reason": "空任务"}
+        return {"route": "single", "reason": "空任务", "risk": False}
 
     reasons: list[str] = []
     if len(text) > max_simple_chars:
@@ -50,8 +73,10 @@ def decide_route(task: str, max_simple_chars: int = MAX_SIMPLE_CHARS) -> dict[st
         if word in lowered:
             reasons.append(f"交付物:{word}")
             break
+    risk_hit = ""
     for word in RISK_WORDS:
         if word in text:
+            risk_hit = word
             reasons.append(f"高风险:{word}")
             break
     for word in VERIFY_WORDS:
@@ -59,6 +84,33 @@ def decide_route(task: str, max_simple_chars: int = MAX_SIMPLE_CHARS) -> dict[st
             reasons.append(f"要求核验:{word}")
             break
 
+    if has_image:
+        reasons.append("带图片，拆解会丢图")
     if reasons:
-        return {"route": "pipeline", "reason": "；".join(reasons)}
-    return {"route": "single", "reason": "短问答、单产物、无多步与风险信号"}
+        return {"route": "pipeline", "reason": "；".join(reasons), "risk": bool(risk_hit)}
+    return {
+        "route": "single",
+        "reason": "短问答、单产物、无多步与风险信号",
+        "risk": False,
+    }
+
+
+def stratum_of(route_info: dict[str, Any], calls: int | None, has_image: bool = False) -> str:
+    """把一次运行归到标定分层；分层的目的是让每类都能独立统计。"""
+    if has_image:
+        return "image"
+    if route_info.get("risk"):
+        return "high_risk"
+    if (route_info.get("decision") or route_info.get("route")) == "pipeline":
+        return "multi_step"
+    return "simple_tool" if (calls or 0) > 1 else "simple_qa"
+
+
+def is_sampled(session_id: str, rate: float = 0.1) -> bool:
+    """确定性采样：同一会话结论稳定，便于回放时复现。"""
+    if rate <= 0:
+        return False
+    if rate >= 1:
+        return True
+    digest = hashlib.sha1((session_id or "").encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % 10_000 < int(rate * 10_000)

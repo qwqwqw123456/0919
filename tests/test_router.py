@@ -7,7 +7,7 @@ from doubao_agent.core.audit import AuditLog
 from doubao_agent.core.memory import MemoryStore
 from doubao_agent.core.permissions import PermissionPolicy
 from doubao_agent.core.pipeline import Pipeline, VERIFY_PROMPT
-from doubao_agent.core.router import decide_route
+from doubao_agent.core.router import decide_route, is_sampled, stratum_of
 from doubao_agent.core.session import SessionStore
 from doubao_agent.providers.mock import MockProvider
 
@@ -139,3 +139,29 @@ async def test_tool_success_without_final_text_is_not_blocked(tmp_path) -> None:
 def test_verifier_must_not_demand_proof_of_invocation() -> None:
     """坑 2：核验器不得要求执行者"再证明调用发生过"。"""
     assert "不要要求它再证明" in VERIFY_PROMPT
+
+
+def test_risk_always_pipeline_even_if_short():
+    decision = decide_route("删除临时文件")
+    assert decision["route"] == "pipeline"
+    assert decision["risk"] is True
+
+
+def test_image_task_goes_pipeline_sidebut_keeps_image_stratum():
+    decision = decide_route("这张图里写了什么", has_image=True)
+    assert decision["route"] == "pipeline"
+    assert "图片" in decision["reason"]
+    assert stratum_of(decision, 1, True) == "image"
+
+
+def test_stratum_split_between_qa_and_tool():
+    assert stratum_of({"decision": "single", "risk": False}, 1) == "simple_qa"
+    assert stratum_of({"decision": "single", "risk": False}, 2) == "simple_tool"
+    assert stratum_of({"decision": "pipeline", "risk": False}, 3) == "multi_step"
+    assert stratum_of({"decision": "pipeline", "risk": True}, 3) == "high_risk"
+
+
+def test_sampling_is_deterministic_and_roughly_ten_percent():
+    assert is_sampled("abc") == is_sampled("abc")
+    hits = sum(is_sampled(f"s{i}") for i in range(1000))
+    assert 60 <= hits <= 140
