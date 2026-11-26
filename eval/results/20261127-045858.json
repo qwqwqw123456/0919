@@ -1,0 +1,29 @@
+{
+  "total": 1,
+  "pass": 1,
+  "pass_rate": 1.0,
+  "tokens": 23650,
+  "by_stratum": {
+    "multi_step": {
+      "total": 1,
+      "pass": 1,
+      "rate": 1.0
+    }
+  },
+  "rows": [
+    {
+      "id": "multi-04",
+      "stratum": "multi_step",
+      "task": "查本机内存总量和可用内存，算出可用占比，把占比写入 /home/user/agent-state/eval-workspace/mem.md，并核对两个原始数字都来自工具返回。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 6,
+      "tokens": 23650,
+      "seconds": 48.5,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：查询本机内存总量与可用内存，计算可用占比并写入指定文件\n\n[s1] 工具已返回真实原始数据：内存总 4129432 KB，可用 3319404 KB（平台 Linux，进程 PID 3309）。可用占比约 80.39%（3319404 / 4129432）。本步仅取证原始数字，写入文件属后续步骤。\n\nSTEP_DONE: 本机内存总量 4129432 KB、可用内存 3319404 KB（均来自 system.status 返回，可用占比约 80.39%）\n\n[s2] STEP_DONE: 已写入 /home/user/agent-state/eval-workspace/mem.md，内存总量 4129432 KB、可用内存 3319404 KB（均来自 system.status 工具返回），可用占比 80.38%\n\n核验：通过"
+    }
+  ]
+}

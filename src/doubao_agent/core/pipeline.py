@@ -27,7 +27,7 @@ PLAN_PROMPT = """你是任务拆解器。只拆解，不执行，不回答问题
 2.1 不要拆"准备/确认/核对/汇报"这类不产生产物的步骤：核对由核验员负责；
 2.2 简单任务（一步能做完）只给一步，不要为了显得完整硬拆；
 2.3 不同步骤不许重复查同一事实，后一步只能基于前一步产物继续加工；
-3. 缺信息写进 criteria 的"待确认"，不许编造；
+3. 缺信息写进 criteria 的"待确认"，不许编造；路径一律从任务原文逐字复制，不改写、不省略目录段；
 4. 确实一步能做完时，steps 只给一步；
 5. 评估/判断/说明类任务最多 2 步：重点是给出结论和依据，不是把事实查个底朝天。
 
@@ -43,13 +43,16 @@ EXEC_PROMPT = """你是执行器，本次只负责一个原子步骤。
 
 要求：
 - 需要工具就真实调用，拿到真实结果，不许假装完成；
+- 文件路径逐字复制，不清洗、不缩写、不改目录层级；/home/user 这类段是真实用户名目录，不是占位符；
 - 检索限定目录与深度，或加 timeout，别做无界递归搜索；
 - 本步最多 2 次工具调用；关键事实够了就停下写 STEP_DONE，不做全面取证；
 - 完成后输出一行：STEP_DONE: <本步产物或结论>
 - 做不了输出一行：STEP_BLOCKED: <缺什么>"""
 
 VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，不给建议方案。
-任务目标：{goal}
+原始任务（路径与要求以此为准）：{task}
+
+拆解目标：{goal}
 
 验收标准：
 {criteria}
@@ -67,26 +70,82 @@ VERIFY_PROMPT = """你是核验员。只核验，不修改，不重做任务，�
 没有确凿证据指出问题就 pass=true，不要因为"可能不够完美"判失败。
 确定性检查里出现“未通过”时，pass 必须为 false，不许多解释；只有“提示”时按验收标准正常判断。
 只按上面的验收标准判断，不许自行添加任务里没有的路径、目录或格式要求；
+拆解里的路径若与原始任务不一致，以原始任务为准；文件在原始任务指定路径上存在且内容正确就判 pass；
 证据不足时判 pass=false 并写明缺哪条标准，不要编造缺口。"""
 
 _JSON_HINT = re.compile(r"\{.*\}", re.S)
 
 
+
+def anchor_paths(plan: dict[str, Any], task: str) -> dict[str, Any]:
+    """拆解器常把路径抄错（少目录段、换前缀）。按任务原文的路径把同名文件拽回来。"""
+    targets = [p for p in paths_in(task) if p.startswith("/")]
+    if not targets:
+        return plan
+    by_name: dict[str, list[str]] = {}
+    for path in targets:
+        by_name.setdefault(Path(path).name, []).append(path)
+
+    def fix(text: str) -> str:
+        for token in paths_in(text):
+            if token in targets:
+                continue
+            candidates = by_name.get(Path(token).name) or []
+            # 只有唯一同名候选才替换，多个候选说明不确定，保持原样
+            if len(candidates) == 1:
+                text = text.replace(token, candidates[0])
+        return text
+
+    plan["goal"] = fix(str(plan.get("goal") or ""))
+    plan["criteria"] = [fix(str(c)) for c in plan.get("criteria") or []]
+    for step in plan.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        step["objective"] = fix(str(step.get("objective") or ""))
+        if isinstance(step.get("output"), str):
+            step["output"] = fix(step["output"])
+    return plan
+
 def _parse_json(text: str) -> dict[str, Any] | None:
+    """先整体解析，失败再逐个候选对象试：模型常在 JSON 前后夹带解释。"""
     if not text:
         return None
     raw = text.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```[a-zA-Z]*\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-    match = _JSON_HINT.search(raw)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
+    for candidate in _json_candidates(raw):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _json_candidates(raw: str) -> list[str]:
+    """按括号配对切出所有顶层 {...}，长的在前，避免贪婪串导致整段解析失败。"""
+    out: list[str] = []
+    greedy = _JSON_HINT.search(raw)
+    if greedy:
+        out.append(greedy.group(0))
+    depth = 0
+    start = -1
+    for index, ch in enumerate(raw):
+        if ch == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    out.append(raw[start : index + 1])
+                    start = -1
+    # 带 pass 字段的优先（那就是判定本体），其次短的（最内层通常是正文而不是套壳）
+    out.sort(key=lambda item: (0 if '"pass"' in item else 1, len(item)))
+    return out
 
 
 def _clip(text: str, limit: int) -> str:
@@ -135,6 +194,7 @@ class Pipeline:
         plan = await self._plan(task, session_id)
         if plan is None or not plan.get("steps"):
             return None
+        plan = self._anchor_paths(plan, task)
 
         if session_id is None:
             session_id = agent.sessions.create(task)
@@ -208,12 +268,12 @@ class Pipeline:
                 {"pass": True, "issues": [], "deescalated": True}, on_event,
             )
 
-        checks = self._artifact_checks(plan, outputs)
+        checks = self._artifact_checks(plan, outputs, task)
         agent.audit.append(
             session_id, "artifact_checks",
             pass_=summarize(checks)["pass"], checks=[c["name"] for c in checks if not c["ok"]],
         )
-        verdict = await self._verify(goal, criteria, outputs, session_id, checks)
+        verdict = await self._verify(goal, criteria, outputs, session_id, checks, task)
         steps_run += 1
         agent.audit.append(session_id, "verify", pass_=verdict["pass"], issues=verdict["issues"])
 
@@ -227,8 +287,8 @@ class Pipeline:
             )
             steps_run += 1
             outputs.append({"id": f"fix{rounds}", "objective": f"修复：{issues}", "output": output})
-            checks = self._artifact_checks(plan, outputs)
-            verdict = await self._verify(goal, criteria, outputs, session_id, checks)
+            checks = self._artifact_checks(plan, outputs, task)
+            verdict = await self._verify(goal, criteria, outputs, session_id, checks, task)
             steps_run += 1
             agent.audit.append(
                 session_id, "verify", pass_=verdict["pass"], issues=verdict["issues"], round=rounds
@@ -240,6 +300,10 @@ class Pipeline:
         return await self._finish(
             task, session_id, goal, outputs, status, answer, steps_run, verdict, on_event
         )
+
+
+    def _anchor_paths(self, plan: dict[str, Any], task: str) -> dict[str, Any]:
+        return anchor_paths(plan, task)
 
     # ---- 各阶段 ----------------------------------------------------------
     async def _plan(self, task: str, session_id: str | None) -> dict[str, Any] | None:
@@ -346,6 +410,7 @@ class Pipeline:
         outputs: list[dict[str, str]],
         session_id: str,
         checks: list[dict[str, Any]] | None = None,
+        task: str = "",
     ) -> dict[str, Any]:
         """阶段三：独立核验。确定性检查先于模型判断，FAIL 不许被模型推翻。"""
         checks = checks or []
@@ -355,6 +420,7 @@ class Pipeline:
             {
                 "role": "system",
                 "content": VERIFY_PROMPT.format(
+                    task=task,
                     goal=goal,
                     criteria=criteria_text,
                     evidence=format_evidence(checks),
@@ -390,7 +456,9 @@ class Pipeline:
             "raw": str(reply.get("content") or ""),
         }
 
-    def _artifact_checks(self, plan: dict[str, Any], outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _artifact_checks(
+        self, plan: dict[str, Any], outputs: list[dict[str, Any]], task_text: str = ""
+    ) -> list[dict[str, Any]]:
         """拆解里声明了产物路径就查文件；执行器说写了文件也回查磁盘。"""
         checks: list[dict[str, Any]] = []
         claimed = set()
@@ -420,7 +488,18 @@ class Pipeline:
                                 "hard": False,
                             }
                         )
-        checks.extend(check_claimed_paths(outputs))
+        task_targets = [p for p in paths_in(task_text) if p.startswith("/")]
+        for check in check_claimed_paths(outputs):
+            if not check.get("ok"):
+                name = str(check.get("name") or "").split(":")[-1]
+                for path in task_targets:
+                    if Path(path).name == name and Path(path).is_file() and Path(path).stat().st_size > 0:
+                        check.update(
+                            ok=True,
+                            detail=f"路径被改写成别的位置，实物在任务指定路径：{path}",
+                        )
+                        break
+            checks.append(check)
         return checks
 
     # ---- 收尾 ------------------------------------------------------------

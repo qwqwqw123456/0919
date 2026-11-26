@@ -1,0 +1,33 @@
+{
+  "total": 1,
+  "pass": 0,
+  "pass_rate": 0.0,
+  "tokens": 50562,
+  "by_stratum": {
+    "multi_step": {
+      "total": 1,
+      "pass": 0,
+      "rate": 0.0
+    }
+  },
+  "rows": [
+    {
+      "id": "multi-07",
+      "stratum": "multi_step",
+      "task": "比较 3^10 和 2^15 哪个大，把结论和两个数值一起写入 /home/user/agent-state/eval-workspace/compare.md，再核对结论与数值一致。",
+      "status": "incomplete",
+      "route": "pipeline",
+      "verified": false,
+      "calls": 12,
+      "tokens": 50562,
+      "seconds": 82.9,
+      "pass": false,
+      "issues": [
+        "file:compare.md: 文件不存在：/home/user/agent-state/eval-workspace/compare.md",
+        "budget:calls: 12 次调用（上限 10）",
+        "status: 运行状态 incomplete"
+      ],
+      "answer": "目标：比较 3^10 与 2^15 的大小，将两个数值和结论写入 /home/agentops-home/agent-state/eval-workspace/compare.md 并核对一致\n\n[s1] {\"status\":\"completed\",\"output\":\"mkdir: cannot create directory ‘/home/agentops-home’: Permission denied\",\"exit_code\":1,\"cwd\":\"/workspace\"}\n\n[s2] {\"status\":\"completed\",\"output\":\"3^10=59049\",\"exit_code\":0,\"cwd\":\"/workspace\"}\n\n[fix1] STEP_BLOCKED: 未产出内容\n\n核验：未通过 — 缺少文件存在于原始任务指定路径 /home/user/agent-sta"
+    }
+  ]
+}

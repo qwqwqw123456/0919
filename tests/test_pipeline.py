@@ -166,3 +166,52 @@ async def test_blocked_atom_with_passing_verdict_counts_completed(tmp_path) -> N
     )
     result = await agent.run("先算 2+2，然后核对结果并给结论")
     assert result["status"] == "completed"
+
+
+async def test_verifier_uses_original_task_path_not_planner_rewrite(tmp_path) -> None:
+    real = tmp_path / "compare.md"
+    real.write_text("3^10=59049", encoding="utf-8")
+    # 拆解器把路径改错（少了父目录段），但执行器写到了任务要求的真实路径
+    plan = (
+        '{"goal":"比较并写入 /tmp/wrong/compare.md","criteria":["结论写入 compare.md"],'
+        '"steps":[{"id":"s1","objective":"计算并写入","output":"/tmp/wrong/compare.md"}]}'
+    )
+    agent = await _agent(
+        tmp_path,
+        [
+            _reply(plan),
+            _reply(f"STEP_DONE: 已写入 {real}"),
+            _reply('{"pass": true, "issues": []}'),
+            _reply('{"pass": true, "issues": []}'),
+        ],
+    )
+    result = await agent.run(f"比较 3^10 和 2^15，把结论写入 {real}，再核对")
+    assert result["status"] == "completed"
+
+
+def test_anchor_paths_rewrites_mangled_plan_path() -> None:
+    from doubao_agent.core.pipeline import anchor_paths
+
+    task = "写入 /home/user/agent-state/eval-workspace/compare.md，再核对"
+    plan = {
+        "goal": "写入 /home/agentops-home/compare.md",
+        "criteria": ["文件在 /home/agentops-home/compare.md"],
+        "steps": [{"id": "s1", "objective": "写 /home/agentops-home/compare.md", "output": "/home/agentops-home/compare.md"}],
+    }
+    fixed = anchor_paths(plan, task)
+    expected = "/home/user/agent-state/eval-workspace/compare.md"
+    assert expected in fixed["goal"]
+    assert expected in fixed["criteria"][0]
+    assert expected in fixed["steps"][0]["objective"]
+    assert fixed["steps"][0]["output"] == expected
+
+
+def test_artifact_check_accepts_file_written_to_task_path_when_claim_mangled(tmp_path) -> None:
+    from doubao_agent.core.pipeline import Pipeline
+
+    real = tmp_path / "mem.md"
+    real.write_text("总 100 KB 可用 80 KB", encoding="utf-8")
+    pipe = Pipeline.__new__(Pipeline)
+    outputs = [{"id": "s1", "objective": "写", "output": f"STEP_DONE: 已写入 /home/agent-state/x/{real.name}"}]
+    checks = pipe._artifact_checks({"steps": []}, outputs, f"写入 {real}")
+    assert checks and all(c["ok"] for c in checks), checks

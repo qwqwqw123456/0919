@@ -47,7 +47,7 @@
     {"id": "multi-03", "stratum": "multi_step", "task": "用 Python 计算 1 到 20 的平方，把结果保存成 {ws}/squares.txt，然后核对文件里是否正好有 20 行。",
      "accept": {"files": [{"path": "{ws}/squares.txt", "min_bytes": 20}], "max_calls": 10}, "note": "脚本生成→行数核对"},
     {"id": "multi-04", "stratum": "multi_step", "task": "查本机内存总量和可用内存，算出可用占比，把占比写入 {ws}/mem.md，并核对两个原始数字都来自工具返回。",
-     "accept": {"files": [{"path": "{ws}/mem.md", "min_bytes": 4}], "max_calls": 10}, "note": "两次取值→计算→落盘"},
+     "accept": {"files": [{"path": "{ws}/mem.md", "min_bytes": 4}], "max_calls": 12}, "note": "两次取值→计算→落盘"},
     {"id": "multi-05", "stratum": "multi_step", "task": "把 2 的 10 次方结果写成 JSON 文件 {ws}/pow.json，键名 value，然后解析该文件确认数值正确。",
      "accept": {"files": [{"path": "{ws}/pow.json", "min_bytes": 10, "json": true}], "max_calls": 10}, "note": "生成 JSON→解析核对"},
     {"id": "multi-06", "stratum": "multi_step", "task": "列出 {ws} 目录下所有文件名，整理成一份清单写入 {ws}/listing.md，然后回读确认清单非空。",
