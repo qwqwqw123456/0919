@@ -14,6 +14,12 @@ auto_approve:
 script_risk: L1                 # 脚本通道风险：L1 直接执行，L2 起需确认
 script_max_cpu: 0               # 脚本 CPU 时间上限（秒），0 表示不限
 record_recipes: true            # 成功任务自动录制为配方，可零模型回放
+pipeline:
+  # 职责分离：拆解器只拆、执行器只做一步、核验器只判对错；核验不过定点修一次。
+  enabled: true
+  max_atoms: 6        # 最多拆几个原子步骤
+  atom_steps: 4       # 单步最多几轮模型/工具往返
+  repair_rounds: 1    # 核验未通过时最多修几轮
 planning:
   enabled: true                 # 每个任务只规划一次，执行阶段零推理；命中配方则 0 次
 skills_dir: /workspace/skills   # Skill 包目录，每个技能一个子目录 + SKILL.md

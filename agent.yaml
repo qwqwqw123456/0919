@@ -11,6 +11,12 @@ auto_approve:
 script_risk: L1
 script_max_cpu: 0
 record_recipes: true
+pipeline:
+  # 职责分离：拆解器只拆、执行器只做一步、核验器只判对错；核验不过定点修一次。
+  enabled: true
+  max_atoms: 6        # 最多拆几个原子步骤
+  atom_steps: 4       # 单步最多几轮模型/工具往返
+  repair_rounds: 1    # 核验未通过时最多修几轮
 planning:
   # 默认关：开启后每个任务先串一次模型做计划，简单任务纯多一次往返，
   # 且计划畸形时会被判 incomplete。多步重活临时改回 true 再跑。

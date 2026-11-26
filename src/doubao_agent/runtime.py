@@ -29,6 +29,7 @@ from .providers import ModelProvider, build_provider
 from .providers.embedding import BridgeEmbedding
 from .registry import CapabilityRegistry
 from .skills import SkillManager
+from .core.pipeline import Pipeline
 from .sources import (
     A2ASource,
     ApiSource,
@@ -209,6 +210,13 @@ class Runtime:
             tool_retries=config.tool_retries,
             skills=skills,
         )
+        if config.pipeline_enabled:
+            agent.pipeline = Pipeline(
+                agent,
+                max_atoms=config.pipeline_max_atoms,
+                atom_steps=config.pipeline_atom_steps,
+                repair_rounds=config.pipeline_repair_rounds,
+            )
         return cls(
             config=config,
             registry=registry,
@@ -261,7 +269,7 @@ class Runtime:
         端点兜底配置（备用 provider / 重试 / 摘要）必须显式透传，否则配置里写的
         兜底策略在正常跑任务时不生效。
         """
-        return Agent(
+        spawned = Agent(
             registry=self.registry,
             provider=self.provider,
             policy=self.agent.policy,
@@ -288,6 +296,14 @@ class Runtime:
             profile=self.profile,
             skills=self.skills,
         )
+        if self.config.pipeline_enabled:
+            spawned.pipeline = Pipeline(
+                spawned,
+                max_atoms=self.config.pipeline_max_atoms,
+                atom_steps=self.config.pipeline_atom_steps,
+                repair_rounds=self.config.pipeline_repair_rounds,
+            )
+        return spawned
 
     @staticmethod
     def _run_meter(config: Config) -> UsageMeter:

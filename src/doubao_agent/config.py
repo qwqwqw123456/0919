@@ -89,6 +89,10 @@ class Config:
     tool_cache_ttl: float = 60.0       # 结果缓存存活秒数；0 或开关关闭即不缓存
     tool_channel_concurrency: int = 3  # 单通道工具并发上限；0 表示不限制
     planning_enabled: bool = False     # 入口单次规划：每任务 1 次模型调用，执行阶段零推理
+    pipeline_enabled: bool = False     # 任务流水线：拆解→逐原子步骤→独立核验→定点修复
+    pipeline_max_atoms: int = 6        # 流水线最多拆几个原子步骤
+    pipeline_atom_steps: int = 4       # 单个原子步骤最多几轮模型/工具往返
+    pipeline_repair_rounds: int = 1    # 核验未通过时允许修复的轮数
     skills_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("AGENT_SKILLS_DIR") or _default_workspace() / "skills"
@@ -244,6 +248,14 @@ def load_config(path: str | Path | None = None) -> Config:
         planning = data.get("planning") or {}
         if isinstance(planning, dict):
             cfg.planning_enabled = bool(planning.get("enabled", cfg.planning_enabled))
+        pipeline = data.get("pipeline") or {}
+        if isinstance(pipeline, dict):
+            cfg.pipeline_enabled = bool(pipeline.get("enabled", cfg.pipeline_enabled))
+            cfg.pipeline_max_atoms = max(1, int(pipeline.get("max_atoms", cfg.pipeline_max_atoms)))
+            cfg.pipeline_atom_steps = max(1, int(pipeline.get("atom_steps", cfg.pipeline_atom_steps)))
+            cfg.pipeline_repair_rounds = max(
+                0, int(pipeline.get("repair_rounds", cfg.pipeline_repair_rounds))
+            )
         cfg.max_steps = int(data.get("max_steps", cfg.max_steps))
         cfg.max_calls = max(0, int(data.get("max_calls", cfg.max_calls)))
         cfg.max_tokens = max(0, int(data.get("max_tokens", cfg.max_tokens)))
@@ -301,6 +313,8 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.record_recipes = os.environ["AGENT_RECORD_RECIPES"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_PLANNING") is not None:
         cfg.planning_enabled = os.environ["AGENT_PLANNING"].lower() in ("1", "true", "yes", "on")
+    if os.environ.get("AGENT_PIPELINE") is not None:
+        cfg.pipeline_enabled = os.environ["AGENT_PIPELINE"].lower() in ("1", "true", "yes", "on")
     if os.environ.get("AGENT_PROVIDER_RETRIES"):
         cfg.provider_retries = max(0, int(os.environ["AGENT_PROVIDER_RETRIES"]))
     if os.environ.get("AGENT_PROVIDER_FALLBACK") is not None:

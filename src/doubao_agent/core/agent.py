@@ -277,6 +277,7 @@ class Agent:
         total_usage: UsageMeter | None = None,
         profile: Any = None,
         skills: Any = None,
+        pipeline: Any = None,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -294,6 +295,8 @@ class Agent:
         self.profile = profile
         # 技能库：只用于按任务关键词做本地匹配，把命中的技能名与会话级提示注入提示词。
         self.skills = skills
+        # 任务流水线（拆解/执行/核验分离）；为 None 时走常规 ReAct 循环。
+        self.pipeline = pipeline
         self.context_limit = context_limit
         self.working = working
         self.repair_rounds = repair_rounds
@@ -548,6 +551,11 @@ class Agent:
     ) -> dict[str, Any]:
         existing = self.sessions.get(session_id) if session_id else None
         history = self.sessions.messages(session_id) if existing else []
+        # 流水线只接全新任务：带图片、续跑或多模态场景仍走常规循环，避免拆解丢失输入。
+        if self.pipeline is not None and not history and not images:
+            piped = await self.pipeline.run(task, session_id, on_event)
+            if piped is not None:
+                return piped
         # 只有真正有进度的会话才算恢复；预创建的空会话仍然走入口规划。
         # 带图片时跳过入口规划：规划只看文本，图片要留给多模态主循环。
         if self.planner is not None and not history and not images:
