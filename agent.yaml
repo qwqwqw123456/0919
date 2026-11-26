@@ -20,8 +20,8 @@ context_limit: 40
 scheduler_enabled: true
 scheduler_interval: 30
 max_steps: 40
-max_calls: 300       # 单次运行模型调用预算，0=不限；防跑飞
-max_tokens: 5000000  # 单次运行 token 预算，0=不限；防跑飞
+max_calls: 200       # 单次运行模型调用预算，0=不限；防跑飞
+max_tokens: 1000000  # 单次运行 token 预算，0=不限；防跑飞
 repair_rounds: 1    # 规划步骤失败时让模型修正参数的轮数
 tool_retries: 1     # 幂等工具遇到瞬时错误时的重试次数（0=不重试）
 tool_rate_limits: {}  # 按通道每分钟调用上限，如 {browser: 30, default: 120}；空=不限
