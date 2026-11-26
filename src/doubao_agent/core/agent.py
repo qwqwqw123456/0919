@@ -21,6 +21,7 @@ from .planner import Plan, Planner
 from .recipe import RecipeStore
 from .session import SessionStore
 from .telemetry import Telemetry
+from .router import decide_route
 from .usage import UsageMeter
 from .working import WorkingMemory
 
@@ -549,13 +550,78 @@ class Agent:
         on_event: Callable[[dict[str, Any]], Any] | None = None,
         images: list[str] | None = None,
     ) -> dict[str, Any]:
-        existing = self.sessions.get(session_id) if session_id else None
-        history = self.sessions.messages(session_id) if existing else []
-        # 流水线只接全新任务：带图片、续跑或多模态场景仍走常规循环，避免拆解丢失输入。
-        if self.pipeline is not None and not history and not images:
+        """入口：先做规则分流，再决定走单循环还是流水线。
+
+        - 明确简单：单循环，套紧预算硬闸（3 次调用 / 2 万 token），失败即升级流水线
+        - 其余或拿不准：流水线（拆解 → 逐原子执行 → 独立核验 → 定点修复一次）
+        - 带图片：直接单循环，拆解只看文本会丢图
+        """
+        if self.pipeline is None or images:
+            return await self._run_loop(task, session_id, on_event, images=images)
+
+        decision = decide_route(task)
+        self._route = {
+            "decision": decision["route"],
+            "reason": decision["reason"],
+            "escalated": False,
+            "deescalated": False,
+        }
+
+        if decision["route"] == "pipeline":
             piped = await self.pipeline.run(task, session_id, on_event)
             if piped is not None:
-                return piped
+                return self._with_route(piped)
+            self._route["reason"] += "；拆解失败，回落单循环"
+            return self._with_route(await self._run_loop(task, session_id, on_event, images=images))
+
+        # 简单任务：预算硬闸，超限或结果不完整就升级，不许在单循环里耗到底
+        original = (self.usage.max_calls, self.usage.max_tokens)
+        self.usage.max_calls = min(original[0], 3) if original[0] else 3
+        self.usage.max_tokens = min(original[1], 20000) if original[1] else 20000
+        try:
+            result = await self._run_loop(task, session_id, on_event, images=images)
+        finally:
+            self.usage.max_calls, self.usage.max_tokens = original
+
+        if result.get("status") != "completed":
+            self._route["escalated"] = True
+            self._route["reason"] += "；单循环未完成，升级流水线"
+            piped = await self.pipeline.run(task, result.get("session_id"), on_event)
+            if piped is not None:
+                return self._with_route(piped)
+        return self._with_route(result)
+
+    def _with_route(self, result: dict[str, Any]) -> dict[str, Any]:
+        """把分流结论与成本写进结果与审计，口径固定，便于回归对比。"""
+        route = dict(getattr(self, "_route", {"decision": "single", "reason": "未启用分流"}))
+        route.setdefault("escalated", False)
+        pipeline_info = result.get("pipeline") or {}
+        if pipeline_info.get("deescalated"):
+            route["deescalated"] = True
+        usage = result.get("usage") or {}
+        route.update(
+            {
+                "steps": result.get("steps"),
+                "calls": usage.get("calls"),
+                "tokens": usage.get("total_tokens"),
+                "verify_pass": pipeline_info.get("verified"),
+            }
+        )
+        result["route"] = route
+        session_id = result.get("session_id")
+        if session_id:
+            self.audit.append(session_id, "route", **route)
+        return result
+
+    async def _run_loop(
+        self,
+        task: str,
+        session_id: str | None = None,
+        on_event: Callable[[dict[str, Any]], Any] | None = None,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]:
+        existing = self.sessions.get(session_id) if session_id else None
+        history = self.sessions.messages(session_id) if existing else []
         # 只有真正有进度的会话才算恢复；预创建的空会话仍然走入口规划。
         # 带图片时跳过入口规划：规划只看文本，图片要留给多模态主循环。
         if self.planner is not None and not history and not images:

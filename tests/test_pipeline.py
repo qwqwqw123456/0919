@@ -10,8 +10,9 @@ from doubao_agent.core.pipeline import Pipeline, _parse_json
 from doubao_agent.core.session import SessionStore
 from doubao_agent.providers.mock import MockProvider
 
+# 两条验收标准：确保不会走"单步 + 无工具 + 标准极简"的降级出口
 PLAN = (
-    '{"goal":"算 2+2","criteria":["答案是 4"],'
+    '{"goal":"算 2+2","criteria":["结果是 4","结论里写明 4"],'
     '"steps":[{"id":"s1","objective":"只计算 2+2 的值"}]}'
 )
 
@@ -46,7 +47,7 @@ async def test_pipeline_runs_atom_then_verifies(tmp_path) -> None:
         [_reply(PLAN), _reply("STEP_DONE: 4"), _reply('{"pass": true, "issues": []}')],
     )
 
-    result = await agent.run("2+2 等于几")
+    result = await agent.run("先算 2+2，然后核对结果并给结论")
 
     assert result["status"] == "completed"
     assert result["pipeline"]["verified"] is True
@@ -66,7 +67,7 @@ async def test_pipeline_repairs_once_then_passes(tmp_path) -> None:
         ],
     )
 
-    result = await agent.run("2+2 等于几")
+    result = await agent.run("先算 2+2，然后核对结果并给结论")
 
     assert result["status"] == "completed"
     assert result["pipeline"]["verified"] is True
@@ -86,7 +87,7 @@ async def test_pipeline_reports_incomplete_when_verification_fails(tmp_path) -> 
         repair_rounds=1,
     )
 
-    result = await agent.run("2+2 等于几")
+    result = await agent.run("先算 2+2，然后核对结果并给结论")
 
     assert result["status"] == "incomplete"  # 不许把没通过核验的结果标成完成
     assert result["pipeline"]["issues"] == ["仍然是 5"]
@@ -96,7 +97,7 @@ async def test_pipeline_reports_incomplete_when_verification_fails(tmp_path) -> 
 async def test_invalid_plan_falls_back_to_react_loop(tmp_path) -> None:
     agent = await _agent(tmp_path, [_reply("我不会拆解"), _reply("4")])
 
-    result = await agent.run("2+2 等于几")
+    result = await agent.run("先算 2+2，然后核对结果并给结论")
 
     assert result["status"] == "completed"
     assert "pipeline" not in result

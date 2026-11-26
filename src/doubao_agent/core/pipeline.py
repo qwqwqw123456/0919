@@ -100,6 +100,8 @@ class Pipeline:
         self.atom_steps = max(1, int(atom_steps))
         self.repair_rounds = max(0, int(repair_rounds))
         self.context_limit = max(200, int(context_limit))
+        # 本步执行中实际调用了多少次工具，用于判断"拆了但没干活"的降级情形
+        self._atom_tool_calls = 0
 
     # ---- 对外入口 ---------------------------------------------------------
     async def run(
@@ -128,6 +130,7 @@ class Pipeline:
         outputs: list[dict[str, str]] = []
         steps_run = 1  # 拆解本身占一步
         blocked = False
+        deescalated = False
 
         for index, step in enumerate(plan["steps"], 1):
             if agent.cancel_event.is_set():
@@ -142,6 +145,7 @@ class Pipeline:
             if not objective:
                 continue
             await agent._emit(on_event, {"type": "atom_start", "atom": index, "objective": objective})
+            self._atom_tool_calls = 0
             output = await self._atom(task, objective, outputs, session_id, steps_run + 1)
             steps_run += 1
             if output.startswith("STEP_BLOCKED"):
@@ -152,6 +156,23 @@ class Pipeline:
                 output=_clip(output, 200),
             )
             await agent._emit(on_event, {"type": "atom_end", "atom": index, "blocked": blocked})
+
+            # 降级出口：只拆出一步、没动工具、验收标准极简 —— 核验价值为零，直接收尾。
+            if (
+                len(plan["steps"]) == 1
+                and self._atom_tool_calls == 0
+                and len(criteria) <= 1
+            ):
+                deescalated = True
+                break
+
+        if deescalated:
+            agent.audit.append(session_id, "pipeline_deescalated", atoms=len(outputs))
+            answer = self._compose(goal, outputs, {"pass": True, "issues": []})
+            return await self._finish(
+                task, session_id, goal, outputs, "completed", answer, steps_run,
+                {"pass": True, "issues": [], "deescalated": True}, on_event,
+            )
 
         verdict = await self._verify(goal, criteria, outputs, session_id)
         steps_run += 1
@@ -245,6 +266,7 @@ class Pipeline:
             if not calls:
                 break
             for tc in calls:
+                self._atom_tool_calls += 1
                 result = await agent._execute(
                     tc["name"],
                     dict(tc.get("arguments") or {}),
@@ -348,5 +370,6 @@ class Pipeline:
                 "atoms": len(outputs),
                 "verified": bool(verdict and verdict["pass"]),
                 "issues": (verdict or {}).get("issues", []),
+                "deescalated": bool((verdict or {}).get("deescalated")),
             },
         }
