@@ -1,0 +1,74 @@
+{
+  "total": 4,
+  "pass": 3,
+  "pass_rate": 0.75,
+  "tokens": 65195,
+  "by_stratum": {
+    "multi_step": {
+      "total": 4,
+      "pass": 3,
+      "rate": 0.75
+    }
+  },
+  "rows": [
+    {
+      "id": "multi-04",
+      "stratum": "multi_step",
+      "task": "查本机内存总量和可用内存，算出可用占比，把占比写入 /home/user/agent-state/eval-workspace/mem.md，并核对两个原始数字都来自工具返回。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 5,
+      "tokens": 18559,
+      "seconds": 83.3,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：读取本机内存总量与可用内存，计算可用占比并写入 /home/user/agent-state/eval-workspace/mem.md\n\n[s1] STEP_DONE: 内存总量 4129432 KB、可用 3356828 KB（均来自 system.status 返回），可用占比约 81.29%，已写入 /home/user/agent-state/eval-workspace/mem.md\n\n核验：通过"
+    },
+    {
+      "id": "multi-06",
+      "stratum": "multi_step",
+      "task": "列出 /home/user/agent-state/eval-workspace 目录下所有文件名，整理成一份清单写入 /home/user/agent-state/eval-workspace/listing.md，然后回读确认清单非空。",
+      "status": "incomplete",
+      "route": "pipeline",
+      "verified": false,
+      "calls": 8,
+      "tokens": 22392,
+      "seconds": 42.9,
+      "pass": false,
+      "issues": [
+        "file:listing.md: 文件不存在：/home/user/agent-state/eval-workspace/listing.md",
+        "status: 运行状态 incomplete"
+      ],
+      "answer": "目标：列出 /home/user/agent-state/eval-workspace 下所有文件名并整理写入 listing.md\n\n[s1] [stdout]\n3 _files_raw.txt\n./_files_raw.txt\n./mem.md\n./seed.txt\n\n[fix1] STEP_BLOCKED: 未产出内容\n\n核验：未通过 — 确定性检查显示 /home/user/agent-state/eval-workspace/listing.md 不存在，违反‘listing.md 存在且非空’标准；s1 清单仅含 3 个文件名（_files_raw.txt、mem.md、seed.txt），与目录实际 6 个文件不一致，违反‘清单内容与目录实际内容一致’标准；fix1 步骤 STEP_BLOCKED 未产出修复内容，缺少回读确认清单非空的证据"
+    },
+    {
+      "id": "multi-07",
+      "stratum": "multi_step",
+      "task": "比较 3^10 和 2^15 哪个大，把结论和两个数值一起写入 /home/user/agent-state/eval-workspace/compare.md，再核对结论与数值一致。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 5,
+      "tokens": 12061,
+      "seconds": 20.6,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：比较 3^10 与 2^15 的大小，将两个数值和结论写入 /home/user/agent-state/eval-workspace/compare.md\n\n[s1] 计算并核对完成：3^10 = 59049，2^15 = 32768，59049 > 32768，与写入的结论一致。\n\nSTEP_DONE: /home/user/agent-state/eval-workspace/compare.md 已写入 3^10=59049、2^15=32768、结论\"3^10 > 2^15\"，数值与结论一致\n\n核验：通过"
+    },
+    {
+      "id": "multi-08",
+      "stratum": "multi_step",
+      "task": "查出当前 Python 版本和系统版本，合成两行写入 /home/user/agent-state/eval-workspace/env.txt，核对两行都在。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 5,
+      "tokens": 12183,
+      "seconds": 25.3,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：查询当前 Python 版本与系统版本，各自作为一行写入 /home/user/agent-state/eval-workspace/env.txt\n\n[s1] 已执行命令采集并写入，核对两行都在：\n- 第1行：`Python 3.12.11`\n- 第2行：`Linux vefaas-...sandbox 6.6.95.bck.4-rc5-amd64 ... GNU/Linux`\n\nSTEP_DONE: /home/user/agent-state/eval-workspace/env.txt 已写入两行（Python 3.12.11；uname -a 系统信息），核对无误\n\n核验：通过"
+    }
+  ]
+}

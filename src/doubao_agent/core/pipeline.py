@@ -23,12 +23,13 @@ PLAN_PROMPT = """你是任务拆解器。只拆解，不执行，不回答问题
 规则：
 1. 每步只做一件事，步骤不超过 {max_atoms} 个；
 2. 每步必须有可核验产物（文件、数据、结论），不许写"继续处理"这类空话；
-2.0 只有本步真的要写文件时才填 output 绝对路径，否则写 null；路径不许编造，必须是本机可写位置；
+2.0 只有本步真的要写文件时才填 output 绝对路径，否则写 null；不许把"被评估/被检查的对象"当成 output（评估不改原文件）；
 2.1 不要拆"准备/确认/核对/汇报"这类不产生产物的步骤：核对由核验员负责；
 2.2 简单任务（一步能做完）只给一步，不要为了显得完整硬拆；
 2.3 不同步骤不许重复查同一事实，后一步只能基于前一步产物继续加工；
 3. 缺信息写进 criteria 的"待确认"，不许编造；
-4. 确实一步能做完时，steps 只给一步。
+4. 确实一步能做完时，steps 只给一步；
+5. 评估/判断/说明类任务最多 2 步：重点是给出结论和依据，不是把事实查个底朝天。
 
 任务：{task}"""
 
@@ -42,6 +43,8 @@ EXEC_PROMPT = """你是执行器，本次只负责一个原子步骤。
 
 要求：
 - 需要工具就真实调用，拿到真实结果，不许假装完成；
+- 检索限定目录与深度，或加 timeout，别做无界递归搜索；
+- 本步最多 2 次工具调用；关键事实够了就停下写 STEP_DONE，不做全面取证；
 - 完成后输出一行：STEP_DONE: <本步产物或结论>
 - 做不了输出一行：STEP_BLOCKED: <缺什么>"""
 
@@ -103,6 +106,7 @@ class Pipeline:
         agent: Any,
         max_atoms: int = 6,
         atom_steps: int = 4,
+        atom_tool_max: int = 3,  # 实测：列目录→落盘→回读这类一步要 3 次工具，2 次会截断
         deadline_seconds: float = 240.0,
         repair_rounds: int = 1,
         context_limit: int = 800,
@@ -110,6 +114,8 @@ class Pipeline:
         self.agent = agent
         self.max_atoms = max(1, int(max_atoms))
         self.atom_steps = max(1, int(atom_steps))
+        # 单步工具调用硬上限：不靠模型自觉收敛，超过就带着已有结果收步
+        self.atom_tool_max = max(1, int(atom_tool_max))
         self.deadline_seconds = float(deadline_seconds)
         self.repair_rounds = max(0, int(repair_rounds))
         self.context_limit = max(200, int(context_limit))
@@ -175,6 +181,15 @@ class Pipeline:
                 output=_clip(output, 200),
             )
             await agent._emit(on_event, {"type": "atom_end", "atom": index, "blocked": blocked})
+
+            # 时限预算：本步跑完已经吃掉大半时限，就不再核验/修复，直接如实收尾
+            if time.monotonic() - started > self.deadline_seconds * 0.75:
+                agent.audit.append(session_id, "deadline_stop", atoms=len(outputs))
+                return await self._finish(
+                    task, session_id, goal, outputs, "incomplete",
+                    f"本步已用掉 {time.monotonic() - started:.0f}s，超过时限预算的 3/4，停止以免继续烧额度",
+                    steps_run, None, on_event,
+                )
 
             # 降级出口：只拆出一步、没动工具、验收标准极简 —— 核验价值为零，直接收尾。
             if (
@@ -290,7 +305,13 @@ class Pipeline:
                 last = content
             if not calls:
                 break
+            if self._atom_tool_calls >= self.atom_tool_max:
+                # 本步工具额度用完，不再让模型继续取证，用已有结果收步
+                last = last or last_tool
+                break
             for tc in calls:
+                if self._atom_tool_calls >= self.atom_tool_max:
+                    break
                 self._atom_tool_calls += 1
                 result = await agent._execute(
                     tc["name"],

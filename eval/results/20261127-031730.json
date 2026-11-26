@@ -1,0 +1,29 @@
+{
+  "total": 1,
+  "pass": 1,
+  "pass_rate": 1.0,
+  "tokens": 23503,
+  "by_stratum": {
+    "multi_step": {
+      "total": 1,
+      "pass": 1,
+      "rate": 1.0
+    }
+  },
+  "rows": [
+    {
+      "id": "multi-06",
+      "stratum": "multi_step",
+      "task": "列出 /home/user/agent-state/eval-workspace 目录下所有文件名，整理成一份清单写入 /home/user/agent-state/eval-workspace/listing.md，然后回读确认清单非空。",
+      "status": "completed",
+      "route": "pipeline",
+      "verified": true,
+      "calls": 7,
+      "tokens": 23503,
+      "seconds": 73.2,
+      "pass": true,
+      "issues": [],
+      "answer": "目标：列出 /home/user/agent-state/eval-workspace 目录下所有文件名，整理成清单写入 listing.md，并回读确认清单非空\n\n[s1] 清单已生成并回读确认非空（63 字节，含 1 个文件条目）。\n\nSTEP_DONE: /home/user/agent-state/eval-workspace/listing.md 已写入，内容为「# 文件清单」+ 目录内全部文件名（find -type f 结果：/home/user/agent-state/eval-workspace/seed.txt），回读验证文件非空。\n\n核验：通过"
+    }
+  ]
+}

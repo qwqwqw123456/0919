@@ -35,6 +35,7 @@ SYSTEM_PROMPT = """你是运行在豆包云电脑上的通用 AI Agent。
 3. 工具名来自统一注册表（MCP、HTTP API、浏览器、桌面自动化），调用方式一致；不得臆造工具名或参数。
 4. 只读操作可直接执行；不可逆操作（删除、支付、对外发布、发送消息、权限迁移）由权限门拦截，如实向用户说明，不绕过。
 5. **脚本优先**：多步操作用 script.run_python / script.run_shell 合并成一次执行，不拆成多次零散调用；脚本必须非交互，关键结果用 print 输出，便于一次判断成败。
+5.1 **检索必须有界**：不跑无界递归搜索（如 grep -r /home/user），必须限定目录、`-maxdepth`，或用 `timeout 20` 包住；一次超时等于白烧一整轮预算。
 6. 长任务随时可能中断，每一步都留痕；恢复时从已有进度继续，不重复已完成的操作。
 
 【改动与交付纪律】
@@ -555,7 +556,7 @@ class Agent:
     ) -> dict[str, Any]:
         """入口：先做规则分流，再决定走单循环还是流水线。
 
-        - 明确简单：单循环，套紧预算硬闸（2 次调用 / 1.5 万 token），失败即升级流水线
+        - 明确简单：单循环，套紧预算硬闸（3 次调用 / 2 万 token），失败即升级流水线
         - 其余或拿不准：流水线（拆解 → 逐原子执行 → 独立核验 → 定点修复一次）
         - 带图片：直接单循环，拆解只看文本会丢图
         """
@@ -586,8 +587,10 @@ class Agent:
 
         # 简单任务：预算硬闸，超限或结果不完整就升级，不许在单循环里耗到底
         original = (self.usage.max_calls, self.usage.max_tokens)
-        self.usage.max_calls = min(original[0], 2) if original[0] else 2
-        self.usage.max_tokens = min(original[1], 15000) if original[1] else 15000
+        # 实测口径：一次工具往返 + 一次收尾 = 3 次调用；2 次闸会把 df 这类任务逼进流水线，
+        # 反而花 11 次调用。硬闸放宽到 3 次 / 2 万 token，超了照样升级。
+        self.usage.max_calls = min(original[0], 3) if original[0] else 3
+        self.usage.max_tokens = min(original[1], 20000) if original[1] else 20000
         try:
             result = await self._run_loop(task, session_id, on_event, images=images)
         finally:
