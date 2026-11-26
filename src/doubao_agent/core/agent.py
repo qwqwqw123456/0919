@@ -588,9 +588,8 @@ class Agent:
         # 简单任务：预算硬闸，超限或结果不完整就升级，不许在单循环里耗到底
         original = (self.usage.max_calls, self.usage.max_tokens)
         # 实测口径：一次工具往返 + 一次收尾 = 3 次调用；2 次闸会把 df 这类任务逼进流水线，
-        # 反而花 11 次调用。硬闸放宽到 3 次 / 2 万 token，超了照样升级。
+        # 反而花 11 次调用。token 不再设闸（用户口径），只按调用次数和时间挡跑飞。
         self.usage.max_calls = min(original[0], 3) if original[0] else 3
-        self.usage.max_tokens = min(original[1], 20000) if original[1] else 20000
         try:
             result = await self._run_loop(task, session_id, on_event, images=images)
         finally:
