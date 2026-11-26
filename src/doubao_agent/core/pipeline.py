@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from .router import VERIFY_WORDS, has_risk_signal
 from .verify import check_claimed_paths, check_file, claims_write, format_evidence, paths_in, summarize
 
 PLAN_PROMPT = """你是任务拆解器。只拆解，不执行，不回答问题。
@@ -180,6 +181,7 @@ class Pipeline:
         self.context_limit = max(200, int(context_limit))
         # 本步执行中实际调用了多少次工具，用于判断"拆了但没干活"的降级情形
         self._atom_tool_calls = 0
+        self._risk = False
 
     # ---- 对外入口 ---------------------------------------------------------
     async def run(
@@ -195,6 +197,8 @@ class Pipeline:
         if plan is None or not plan.get("steps"):
             return None
         plan = self._anchor_paths(plan, task)
+        verify_required = any(word in task for word in VERIFY_WORDS)
+        self._risk = has_risk_signal(task)
 
         if session_id is None:
             session_id = agent.sessions.create(task)
@@ -269,6 +273,21 @@ class Pipeline:
             )
 
         checks = self._artifact_checks(plan, outputs, task)
+        # 单步任务没有跨步骤一致性可核，确定性检查说了算，省掉一次核验往返
+        if len(plan["steps"]) == 1 and not verify_required and not self._risk:
+            hard = summarize(checks)
+            verdict = {"pass": hard["pass"], "issues": hard["issues"], "single_step": True}
+            agent.audit.append(
+                session_id, "artifact_checks",
+                pass_=hard["pass"], checks=[c["name"] for c in checks if not c["ok"]],
+                skipped_verify=True,
+            )
+            agent.audit.append(session_id, "verify", pass_=hard["pass"], issues=hard["issues"], skipped=True)
+            status = "completed" if hard["pass"] else "incomplete"
+            answer = self._compose(goal, outputs, verdict)
+            return await self._finish(
+                task, session_id, goal, outputs, status, answer, steps_run, verdict, on_event
+            )
         agent.audit.append(
             session_id, "artifact_checks",
             pass_=summarize(checks)["pass"], checks=[c["name"] for c in checks if not c["ok"]],

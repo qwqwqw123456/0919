@@ -86,6 +86,9 @@ def decide_route(
 
     if has_image:
         reasons.append("带图片，拆解会丢图")
+    # 唯一命中项只是"文件"、且任务很短（单产物单动作）：允许单循环，硬闸兜底
+    if reasons and len(reasons) == 1 and reasons[0] == "交付物:文件" and len(text) <= max_simple_chars:
+        return {"route": "single", "reason": "短任务、单文件产物，硬闸兜底", "risk": False}
     if reasons:
         return {"route": "pipeline", "reason": "；".join(reasons), "risk": bool(risk_hit)}
     return {
