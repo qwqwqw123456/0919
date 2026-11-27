@@ -141,12 +141,18 @@ class EdgeTTS:
 
     name = "edge"
 
-    def __init__(self, voice: str = "zh-CN-XiaoxiaoNeural", timeout: float = 20.0) -> None:
+    def __init__(
+        self,
+        voice: str = "zh-CN-XiaoxiaoNeural",
+        timeout: float = 20.0,
+        fallback: Any = None,
+    ) -> None:
         self.voice = voice
         self.timeout = timeout
+        self.fallback = fallback  # 无网/接口变更时退本地 Piper
 
     def synthesize(self, text: str) -> tuple[bytes, int]:
-        """优先走 edge_tts 的异步 API（~0.5–1s），失败再退回子进程（~2s）。"""
+        """优先走 edge_tts 的异步 API（~0.5–1s），失败再退回子进程（~2s），最后退 fallback。"""
         try:
             import asyncio
 
@@ -181,6 +187,10 @@ class EdgeTTS:
                 raise RuntimeError(proc.stderr.decode("utf-8", "replace")[-300:])
             pcm = decode_audio_any(Path(out), SAMPLE_RATE)
             return pcm, SAMPLE_RATE
+        except Exception:  # noqa: BLE001
+            if self.fallback is None:
+                raise
+            return self.fallback.synthesize(text)
         finally:
             Path(out).unlink(missing_ok=True)
 
@@ -231,7 +241,8 @@ def build_engines(cfg: dict[str, Any] | None = None) -> tuple[Any, Any]:
 
     model_path = str(cfg.get("piper_model") or Path.home() / "tools/voice/zh_CN-huayan-medium.onnx")
     if tts_kind == "edge":
-        tts = EdgeTTS(str(cfg.get("edge_voice") or "zh-CN-XiaoxiaoNeural"))
+        local = PiperTTS(model_path) if Path(model_path).expanduser().is_file() else None
+        tts = EdgeTTS(str(cfg.get("edge_voice") or "zh-CN-XiaoxiaoNeural"), fallback=local)
     elif tts_kind == "piper" and Path(model_path).expanduser().is_file():
         tts = PiperTTS(model_path)
     else:

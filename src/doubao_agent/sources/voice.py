@@ -35,6 +35,8 @@ class VoiceSource:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self._asr = None
         self._tts = None
+        self._ack_tts = None
+        self._ack_cache: tuple[bytes, int] | None = None
 
     def bind_reply(self, reply: Callable[[str], Any], takes_history: bool = True) -> None:
         """构造顺序问题：Runtime 实例晚于本通道创建，创建后把真作答函数回填进来。"""
@@ -44,6 +46,8 @@ class VoiceSource:
     def _engines(self):
         if self._asr is None or self._tts is None:
             self._asr, self._tts = build_engines(self.cfg)
+        if self._ack_tts is None:
+            # 垫话固定走本地快引擎：主音色的网络延迟不能拖到"第一声人声"
             model = Path(str(self.cfg.get("piper_model") or VOICE_DIR / "zh_CN-huayan-medium.onnx")).expanduser()
             self._ack_tts = self._tts if type(self._tts).__name__ == "PiperTTS" else (
                 PiperTTS(model) if model.is_file() else self._tts
@@ -116,9 +120,11 @@ class VoiceSource:
         """给实时双工端点复用：同一套引擎与作答函数，含垫话预热。"""
         asr, tts = self._engines()
         session = VoiceSession(
-            asr, tts, lambda text, history: self._reply(text, history), ack_tts=self._ack_tts
+            asr, tts, lambda text, history: self._reply(text, history),
+            ack_tts=self._ack_tts, ack_audio=self._ack_cache,
         )
         session.prewarm()
+        self._ack_cache = session.ack_payload() or self._ack_cache
         session.mark_start()
         return session
 
@@ -170,10 +176,12 @@ class VoiceSource:
     async def _call(self, call: ToolCall, args: dict[str, Any]) -> ToolResult:
         asr, tts = self._engines()
         session = VoiceSession(
-            asr, tts, lambda text, history: self._reply(text, history), ack_tts=self._ack_tts
+            asr, tts, lambda text, history: self._reply(text, history),
+            ack_tts=self._ack_tts, ack_audio=self._ack_cache,
         )
         t_prewarm = time.time()
         session.prewarm()
+        self._ack_cache = session.ack_payload() or self._ack_cache
         warmup_ms = round((time.time() - t_prewarm) * 1000, 1)
         session.mark_start()
         timeline: list[dict[str, Any]] = []
@@ -230,7 +238,8 @@ class VoiceSource:
             ),
             error=None if ok else "未生成回复",
             meta={"reply": reply_text, "audio": str(out_path) if audio_blob else "",
-                  "timeline": timeline, "asr_ms": asr_ms, "first_audio_ms": first_audio_ms},
+                  "timeline": timeline, "asr_ms": asr_ms, "first_audio_ms": first_audio_ms,
+                  "tts": type(tts).__name__, "warmup_ms": warmup_ms},
         )
 
     async def _reply(self, text: str, history: list[dict[str, str]] | None = None) -> str:

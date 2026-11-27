@@ -83,6 +83,25 @@ def test_session_barge_in_drops_queued_audio() -> None:
     assert s.drain_audio() == []
 
 
+def test_edge_tts_falls_back_to_piper(monkeypatch) -> None:
+    from doubao_agent.voice.engines import EdgeTTS
+
+    edge = EdgeTTS("zh-CN-XiaoxiaoNeural", fallback=MockTTS())
+    monkeypatch.setattr("edge_tts.Communicate", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no net")))
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: (_ for _ in ()).throw(OSError("no cli")))
+    pcm, rate = edge.synthesize("兜底测试")
+    assert pcm and rate == SR
+
+
+def test_ack_cache_survives_new_session() -> None:
+    s1 = VoiceSession(MockASR(), MockTTS(), lambda t, h: asyncio.sleep(0, "好"), quick_ack="嗯，我在听。")
+    s1.prewarm()
+    payload = s1.ack_payload()
+    assert payload
+    s2 = VoiceSession(MockASR(), MockTTS(), lambda t, h: asyncio.sleep(0, "好"), quick_ack="嗯，我在听。", ack_audio=payload)
+    assert s2.ack_payload() == payload
+
+
 def test_session_ack_is_prewarmed() -> None:
     s = VoiceSession(MockASR(), MockTTS(), lambda t, h: asyncio.sleep(0, "好的"), quick_ack="嗯，我在听。")
     s.prewarm()

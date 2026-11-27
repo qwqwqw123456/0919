@@ -11,10 +11,10 @@ auto_approve:
 script_risk: L1
 # 本地安全工具箱：~/tools 下的 54 项 CLI 以「目录 + 受控执行」接入，不逐个铺 schema
 voice:
-  # 本地语音：Piper 中文音色合成 + faster-whisper base 识别，全程不联网、不计费
+  # 语音：edge 真人音色合成（默认，实测每句 1.4–2.8s 含 WS 握手）+ faster-whisper base 识别；垫话与断网兜底走 Piper 本地
   enabled: true
   asr: whisper
-  tts: piper           # piper=本地 0.4s/句、离线；改 edge 可换 Xiaoxiao 音色（+2s 网络延迟）
+  tts: edge            # edge=Xiaoxiao 真人音色（默认）；无网/失败自动退 piper 本地合成
   whisper_model: base
   piper_model: ~/tools/voice/zh_CN-huayan-medium.onnx   # 离线兜底音色（espeak 音素，中文偏机械）
   edge_voice: zh-CN-XiaoxiaoNeural

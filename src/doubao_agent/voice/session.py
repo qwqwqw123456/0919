@@ -64,6 +64,7 @@ class VoiceSession:
         quick_ack: str = "嗯，我在听。",
         tts_workers: int = 3,
         ack_tts=None,
+        ack_audio: tuple[bytes, int] | None = None,
     ) -> None:
         self.asr = asr
         self.tts = tts
@@ -77,8 +78,8 @@ class VoiceSession:
         self._spoken: list[str] = []
         self.quick_ack = quick_ack
         self.ack_tts = ack_tts or tts   # 垫话优先用本地快引擎，别让主音色的网络延迟拖首声
-        self._ack_pcm: bytes | None = None
-        self._ack_rate = 16000
+        self._ack_pcm: bytes | None = ack_audio[0] if ack_audio else None
+        self._ack_rate = ack_audio[1] if ack_audio else 16000
         self._pool = ThreadPoolExecutor(max_workers=max(1, tts_workers), thread_name_prefix="tts")
 
     def now_ms(self) -> float:
@@ -170,6 +171,10 @@ class VoiceSession:
                            meta={"rate": rate, "bytes": len(pcm), "seconds": round(len(pcm) / 2 / rate, 2)})
             )
         return events
+
+    def ack_payload(self) -> tuple[bytes, int] | None:
+        """已合成好的垫话，供上层跨会话复用（省掉每次冷启的合成开销）。"""
+        return (self._ack_pcm, self._ack_rate) if self._ack_pcm else None
 
     def prewarm(self) -> None:
         """会话开始就把垫话合成好，真说话时首声接近 0ms。"""
