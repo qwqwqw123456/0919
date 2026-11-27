@@ -156,10 +156,16 @@ class VoiceSource:
                 pcm, rate = tts.synthesize(text)
             except Exception as exc:  # noqa: BLE001
                 return ToolResult(call_id=call.call_id, ok=False, error=f"TTS 失败：{exc}")
-            name = str(args.get("filename") or f"say-{int(time.time())}.wav")
-            if not name.endswith(".wav"):
-                name += ".wav"
-            out_path = self.out_dir / Path(name).name
+            raw = str(args.get("filename") or "").strip()
+            if raw:
+                cand = Path(raw).expanduser()
+                # CLI 给了带目录的路径就照办，别把用户指定的位置悄悄改到默认目录
+                out_path = cand if (cand.is_absolute() or len(cand.parts) > 1) else self.out_dir / cand.name
+            else:
+                out_path = self.out_dir / f"say-{int(time.time())}.wav"
+            if out_path.suffix.lower() != ".wav":
+                out_path = out_path.with_suffix(".wav")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_bytes(wav_bytes(pcm, rate))
             return ToolResult(
                 call_id=call.call_id,

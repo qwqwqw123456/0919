@@ -82,6 +82,22 @@ class MockASR:
         }
 
 
+def _run_coro(make_coro: Any) -> Any:
+    """在当前线程跑协程；若本线程已有事件循环（如 CLI 直接同步调合成），放独立线程跑。
+
+    asyncio.run 在运行中的 loop 内会直接抛错，之前被 except 吞掉，白退子进程还留协程告警。
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(make_coro())
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts-loop") as ex:
+        return ex.submit(lambda: asyncio.run(make_coro())).result()
+
+
 class MockTTS:
     """测试用 TTS：按字数产生正弦音，长度可控，便于验证分句与打断。"""
 
@@ -154,8 +170,6 @@ class EdgeTTS:
     def synthesize(self, text: str) -> tuple[bytes, int]:
         """优先走 edge_tts 的异步 API（~0.5–1s），失败再退回子进程（~2s），最后退 fallback。"""
         try:
-            import asyncio
-
             import edge_tts
 
             async def _run() -> bytes:
@@ -165,7 +179,7 @@ class EdgeTTS:
                         chunks.append(chunk["data"])
                 return b"".join(chunks)
 
-            mp3 = asyncio.run(_run())
+            mp3 = _run_coro(_run)
             if mp3:
                 return decode_audio_any(mp3, SAMPLE_RATE), SAMPLE_RATE
         except Exception:  # noqa: BLE001 - 网络/版本问题一律退回子进程

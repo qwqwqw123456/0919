@@ -183,6 +183,14 @@ def test_voice_source_say_then_transcribe(tmp_path: Path) -> None:
     assert tr.ok and tr.content
 
 
+def test_voice_source_say_honors_absolute_path(tmp_path: Path) -> None:
+    src = VoiceSource(lambda text, history=None: "ok", {"asr": "mock", "tts": "mock"}, out_dir=tmp_path)
+    target = tmp_path / "sub" / "given-name"
+    res = asyncio.run(src.call_tool(ToolCall(call_id="c", name="say", arguments={"text": "hi", "filename": str(target)})))
+    assert res.ok and Path(res.meta["path"]) == target.with_suffix(".wav")
+    assert Path(res.meta["path"]).is_file()
+
+
 def test_voice_source_rejects_missing_file(tmp_path: Path) -> None:
     src = VoiceSource(lambda text, history=None: "ok", {}, out_dir=tmp_path)
     res = asyncio.run(src.call_tool(ToolCall(call_id="c", name="transcribe", arguments={"path": str(tmp_path / "nope.wav")})))
