@@ -175,7 +175,11 @@ class ToolboxSource:
             if r["status"] != "ok" and r.get("substitute"):
                 lines.append(f"  替代：{r['substitute']}")
         ready = sum(1 for r in rows if r["status"] == "ok")
-        lines.append(f"\n共 {len(rows)} 项，其中可直接执行 {ready} 项。")
+        lines.append(
+            f"\n共 {len(rows)} 项，其中可直接执行 {ready} 项。"
+            "\n下一步：静态类用 toolbox.run(name=\"…\", args=[…]) 执行；"
+            "主动探测（L2）用 toolbox.scan；不确定能否起得来先 toolbox.probe。"
+        )
         return "\n".join(lines)
 
     async def call_tool(self, call: ToolCall) -> ToolResult:
