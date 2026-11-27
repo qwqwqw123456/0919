@@ -74,6 +74,30 @@ def test_session_answers_with_sentence_audio() -> None:
     assert s.history[-1]["role"] == "assistant"
 
 
+def test_stream_emits_first_sentence_before_rest() -> None:
+    """第一句合成完就吐，不等后面几句——电话要的是头一句马上有声。"""
+    import time as _time
+
+    class SlowTTS:
+        rate = SR
+
+        def synthesize(self, text):
+            _time.sleep(0.5 if "第二" in text else 0.1)
+            return b"\x00\x00" * 400, SR
+
+    async def run():
+        s = VoiceSession(MockASR(), SlowTTS(), lambda t, h: asyncio.sleep(0, "第一句先说。第二句慢点。"), quick_ack="")
+        stamps = []
+        async for ev in s.stream_text("在吗"):
+            if ev.kind == "audio":
+                stamps.append(_time.perf_counter())
+        return stamps
+
+    stamps = asyncio.run(run())
+    assert len(stamps) == 2
+    assert stamps[1] - stamps[0] >= 0.3
+
+
 def test_session_barge_in_drops_queued_audio() -> None:
     s = _session()
     asyncio.run(s.respond(b"\x00\x00" * 100))

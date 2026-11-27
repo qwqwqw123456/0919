@@ -239,6 +239,33 @@ class PiperTTS:
         return (a * 32767).astype(np.int16).tobytes(), SAMPLE_RATE
 
 
+def load_ack_bank(path: str | Path) -> list[tuple[str, bytes, int]]:
+    """加载预生成垫话包（<dir>/ack.json + wav）：返回 [(文字, pcm, 采样率)]。
+
+    用于把豆包音色的短应答零延迟播出去——垫话不能等网络 TTS，只能预生成。
+    """
+    import json
+
+    root = Path(path).expanduser()
+    index = root / "ack.json"
+    if not index.is_file():
+        return []
+    try:
+        rows = json.loads(index.read_text("utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[tuple[str, bytes, int]] = []
+    for row in rows if isinstance(rows, list) else []:
+        wav = root / str(row.get("file") or "")
+        if not wav.is_file():
+            continue
+        try:
+            out.append((str(row.get("text") or ""), pcm16_from_wav(wav), SAMPLE_RATE))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
 def build_engines(cfg: dict[str, Any] | None = None) -> tuple[Any, Any]:
     """按配置选引擎；缺模型/缺依赖时退 mock，并把原因写进 errors 由调用方决定是否降级。"""
     cfg = dict(cfg or {})
@@ -272,6 +299,7 @@ __all__ = [
     "PiperTTS",
     "WhisperASR",
     "build_engines",
+    "load_ack_bank",
     "pcm16_from_wav",
     "resample_to_16k",
     "wav_bytes",

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..types import Risk, SourceKind, ToolCall, ToolResult, ToolSpec
-from ..voice.engines import PiperTTS, build_engines, decode_audio_any, wav_bytes
+from ..voice.engines import PiperTTS, build_engines, decode_audio_any, load_ack_bank, wav_bytes
 from ..voice.session import VoiceSession
 
 VOICE_DIR = Path.home() / "tools" / "voice"
@@ -37,11 +37,34 @@ class VoiceSource:
         self._tts = None
         self._ack_tts = None
         self._ack_cache: tuple[bytes, int] | None = None
+        self._ack_bank: list[tuple[str, bytes, int]] | None = None
 
     def bind_reply(self, reply: Callable[[str], Any], takes_history: bool = True) -> None:
         """构造顺序问题：Runtime 实例晚于本通道创建，创建后把真作答函数回填进来。"""
         self.reply = reply
         self._takes_history = takes_history
+
+    def _pick_ack(self) -> tuple[str, bytes, int] | None:
+        """垫话优先用预生成包（豆包音色，0 延迟）；包不存在才现合成。"""
+        if self._ack_bank is None:
+            root = Path(str(self.cfg.get("ack_dir") or VOICE_DIR / "ack")).expanduser()
+            self._ack_bank = load_ack_bank(root)
+        if not self._ack_bank:
+            return None
+        import random
+
+        return random.choice(self._ack_bank)
+
+    def _new_session(self, asr, tts) -> VoiceSession:
+        picked = self._pick_ack()
+        if picked:
+            text, pcm, rate = picked
+            return VoiceSession(
+                asr, tts, lambda t, h: self._reply(t, h), quick_ack=text, ack_audio=(pcm, rate)
+            )
+        return VoiceSession(
+            asr, tts, lambda t, h: self._reply(t, h), ack_tts=self._ack_tts, ack_audio=self._ack_cache
+        )
 
     def _engines(self):
         if self._asr is None or self._tts is None:
@@ -119,10 +142,7 @@ class VoiceSource:
     def make_session(self) -> VoiceSession:
         """给实时双工端点复用：同一套引擎与作答函数，含垫话预热。"""
         asr, tts = self._engines()
-        session = VoiceSession(
-            asr, tts, lambda text, history: self._reply(text, history),
-            ack_tts=self._ack_tts, ack_audio=self._ack_cache,
-        )
+        session = self._new_session(asr, tts)
         session.prewarm()
         self._ack_cache = session.ack_payload() or self._ack_cache
         session.mark_start()
@@ -181,10 +201,7 @@ class VoiceSource:
 
     async def _call(self, call: ToolCall, args: dict[str, Any]) -> ToolResult:
         asr, tts = self._engines()
-        session = VoiceSession(
-            asr, tts, lambda text, history: self._reply(text, history),
-            ack_tts=self._ack_tts, ack_audio=self._ack_cache,
-        )
+        session = self._new_session(asr, tts)
         t_prewarm = time.time()
         session.prewarm()
         self._ack_cache = session.ack_payload() or self._ack_cache

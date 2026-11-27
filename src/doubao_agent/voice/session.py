@@ -118,25 +118,41 @@ class VoiceSession:
             self._spoken.append(text)
 
     async def respond(self, user_audio: bytes) -> list[VoiceEvent]:
-        """对一段完整用户语音给出回复音频（逐句排队，调用方按 chunk 播）。"""
-        try:
-            asr_out = self.asr.transcribe(user_audio)
-        except Exception as exc:  # noqa: BLE001 - 识别失败也要让通话继续，不炸会话
-            return [VoiceEvent("error", self.now_ms(), text=f"ASR 失败：{type(exc).__name__}: {exc}")]
-        text = str(asr_out.get("text") or "").strip()
-        if not text:
-            return [VoiceEvent("error", self.now_ms(), text="没听清（识别结果为空）")]
-        return await self._answer(text, asr_out)
+        """对一段完整用户语音给出回复（汇总版：调用方一次性拿走全部事件）。"""
+        return [ev async for ev in self.stream_audio(user_audio)]
 
     async def respond_to_text(self, text: str) -> list[VoiceEvent]:
         """跳过 ASR（对方的话已经是文字时的入口，也用于端到端自测）。"""
+        return [ev async for ev in self.stream_text(text)]
+
+    async def stream_audio(self, user_audio: bytes):
+        """流式版：识别→垫话→作答→逐句音频，一有就先吐出去。"""
+        try:
+            asr_out = self.asr.transcribe(user_audio)
+        except Exception as exc:  # noqa: BLE001 - 识别失败也要让通话继续，不炸会话
+            yield VoiceEvent("error", self.now_ms(), text=f"ASR 失败：{type(exc).__name__}: {exc}")
+            return
+        text = str(asr_out.get("text") or "").strip()
+        if not text:
+            yield VoiceEvent("error", self.now_ms(), text="没听清（识别结果为空）")
+            return
+        async for ev in self._answer_stream(text, asr_out):
+            yield ev
+
+    async def stream_text(self, text: str):
         text = str(text or "").strip()
         if not text:
-            return [VoiceEvent("error", self.now_ms(), text="输入为空")]
-        return await self._answer(text, {"engine": "given"})
+            yield VoiceEvent("error", self.now_ms(), text="输入为空")
+            return
+        async for ev in self._answer_stream(text, {"engine": "given"}):
+            yield ev
 
     async def _answer(self, text: str, asr_meta: dict[str, Any]) -> list[VoiceEvent]:
-        events: list[VoiceEvent] = [VoiceEvent("user_text", self.now_ms(), text=text, meta=asr_meta)]
+        return [ev async for ev in self._answer_stream(text, asr_meta)]
+
+    async def _answer_stream(self, text: str, asr_meta: dict[str, Any]):
+        """逐句边合成边吐事件：第一句不等后面几句，通话能早 1–2 秒出声。"""
+        yield VoiceEvent("user_text", self.now_ms(), text=text, meta=asr_meta)
         self.history.append({"role": "user", "content": text})
         # 先垫一句极短应答：模型还在想的时候，对方先听到人声（电话里最忌死寂）
         if self.quick_ack:
@@ -145,32 +161,42 @@ class VoiceSession:
                     self._ack_pcm, self._ack_rate = self.ack_tts.synthesize(self.quick_ack)
                 ack_pcm, ack_rate = self._ack_pcm, self._ack_rate
                 self._pending_audio.append(ack_pcm)
-                events.append(
-                    VoiceEvent("ack", self.now_ms(), text=self.quick_ack, audio=ack_pcm,
-                               meta={"rate": ack_rate, "bytes": len(ack_pcm),
-                                     "seconds": round(len(ack_pcm) / 2 / ack_rate, 2)})
-                )
+                yield VoiceEvent("ack", self.now_ms(), text=self.quick_ack, audio=ack_pcm,
+                                 meta={"rate": ack_rate, "bytes": len(ack_pcm),
+                                       "seconds": round(len(ack_pcm) / 2 / ack_rate, 2)})
             except Exception as exc:  # noqa: BLE001 - 垫话失败不影响正题
-                events.append(VoiceEvent("error", self.now_ms(), text=f"垫话合成失败：{exc}"))
+                yield VoiceEvent("error", self.now_ms(), text=f"垫话合成失败：{exc}")
         try:
             answer = await self.reply(text, self.history)
         except Exception as exc:  # noqa: BLE001
-            return events + [VoiceEvent("error", self.now_ms(), text=f"回复生成失败：{exc}")]
+            yield VoiceEvent("error", self.now_ms(), text=f"回复生成失败：{exc}")
+            return
         answer = str(answer or "").strip() or "我在，你继续说。"
-        events.append(VoiceEvent("reply_text", self.now_ms(), text=answer))
+        yield VoiceEvent("reply_text", self.now_ms(), text=answer)
         self.history.append({"role": "assistant", "content": answer})
 
         pieces = [s[: self.sentence_chars] for s in split_sentences(answer)[: self.max_sentences]]
+        if not pieces:
+            return
         loop = asyncio.get_running_loop()
-        audio = await asyncio.gather(*[loop.run_in_executor(self._pool, self.tts.synthesize, p) for p in pieces])
-        for piece, (pcm, rate) in zip(pieces, audio):
-            self._pending_audio.append(pcm)
-            self._spoken_append(piece)
-            events.append(
-                VoiceEvent("audio", self.now_ms(), text=piece, audio=pcm,
-                           meta={"rate": rate, "bytes": len(pcm), "seconds": round(len(pcm) / 2 / rate, 2)})
-            )
-        return events
+        pool = self._pool
+        first = await loop.run_in_executor(pool, self.tts.synthesize, pieces[0])
+        rest = (
+            asyncio.gather(*[loop.run_in_executor(pool, self.tts.synthesize, p) for p in pieces[1:]])
+            if len(pieces) > 1 else None
+        )
+        for piece in pieces[:1]:
+            yield self._audio_event(piece, first)
+        if rest is not None:
+            for piece, (pcm, rate) in zip(pieces[1:], await rest):
+                yield self._audio_event(piece, (pcm, rate))
+
+    def _audio_event(self, piece: str, audio: tuple[bytes, int]) -> VoiceEvent:
+        pcm, rate = audio
+        self._pending_audio.append(pcm)
+        self._spoken_append(piece)
+        return VoiceEvent("audio", self.now_ms(), text=piece, audio=pcm,
+                          meta={"rate": rate, "bytes": len(pcm), "seconds": round(len(pcm) / 2 / rate, 2)})
 
     def ack_payload(self) -> tuple[bytes, int] | None:
         """已合成好的垫话，供上层跨会话复用（省掉每次冷启的合成开销）。"""
