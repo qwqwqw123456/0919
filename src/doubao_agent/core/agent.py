@@ -814,6 +814,24 @@ class Agent:
 
             if not tool_calls:
                 answer = content or ""
+                # 空回复当完成，是把没干活交成"已交付"。逼它再答一次，连续两次空就认失败
+                if not answer.strip():
+                    self._empty_replies = getattr(self, "_empty_replies", 0) + 1
+                    self.audit.append(session_id, "empty_reply", step=step, count=self._empty_replies)
+                    if self._empty_replies < 3:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": "上一轮没有任何输出。任务还没做，就继续调工具；已经做完，就用文字给出结论和实际证据。",
+                            }
+                        )
+                        continue
+                    reason = "模型连续无输出，任务未完成"
+                    self.sessions.finish(session_id, reason, "incomplete")
+                    return {
+                        "session_id": session_id, "status": "incomplete", "answer": reason,
+                        "steps": step, "usage": self.usage.snapshot(),
+                    }
                 self.sessions.finish(session_id, answer)
                 self.audit.append(
                     session_id, "finish", step=step, answer=answer, usage=self.usage.snapshot()
@@ -1071,6 +1089,25 @@ class Agent:
             )
         return None
 
+    def _deny_advice(self, denied: str) -> str:
+        """被闸住时直接给能走的路。模型不知道哪条通，就会在原地反复撞同一堵墙。"""
+        advice = {
+            "host.sandbox_file_operations": (
+                "要读就 host.sandbox_execute_bash 跑只读命令（ls -la、cat、stat -c '%n %s'、test -f）；"
+                "要写就 script.run_python 落盘"
+            ),
+            "host.sandbox_str_replace_editor": "写文件改走 script.run_python，一次把改写脚本跑完",
+            "script.run_shell": "只读探测改走 host.sandbox_execute_bash；改文件走 script.run_python",
+            "script.run_python": "改走 host.sandbox_execute_bash 或 script.run_shell",
+        }.get(denied)
+        if advice:
+            return advice
+        usable = [
+            spec.name for spec in self.registry.list_tools()
+            if spec.name not in self._denied_tools and spec.risk.value in ("L0", "L1")
+        ]
+        return "可用的还有：" + "、".join(usable[:8]) if usable else "没有等价替代，把限制直接告诉用户"
+
     async def _execute(
         self, tool_name: str, arguments: dict[str, Any], call_id: str, session_id: str,
         use_cache: bool = True, step: int = 0,
@@ -1098,8 +1135,8 @@ class Agent:
                 call_id=call_id,
                 ok=False,
                 error=(
-                    f"permission denied: {decision.reason}（本次运行已禁用 {spec.name}，"
-                    "不要重试；改用其他工具，或把多步操作合并成一次脚本执行）"
+                    f"permission denied: {decision.reason}（本次运行已禁用 {spec.name}，重试不会通过）"
+                    f"｜替代路径：{self._deny_advice(spec.name)}"
                 ),
             )
 

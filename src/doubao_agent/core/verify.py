@@ -93,19 +93,45 @@ def paths_in(text: str) -> list[str]:
     return seen
 
 
+_DELETE_HINTS = ("删除", "删掉", "已删", "移除", "清理", "rm ", "delete")
+
+def claims_delete(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(hint in lowered for hint in _DELETE_HINTS)
+
+
 def claims_write(text: str) -> bool:
     lowered = (text or "").lower()
     return any(hint in lowered for hint in _WRITE_HINTS)
 
 
 def check_claimed_paths(outputs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """执行器说写了文件，就去看文件在不在；没提路径的不猜。"""
+    """执行器说写了/删了某文件，就回查磁盘。按行判：同一行里的路径跟着该行的动作走。
+
+    删除类任务的产物是"不存在"，拿"必须存在"去查它，等于把干对的活判成失败。
+    """
     checks: list[dict[str, Any]] = []
     for item in outputs:
         output = str(item.get("output") or "")
-        for path in paths_in(output):
-            if claims_write(output):
-                checks.append(check_file(path))
+        for line in re.split(r"[\n，,；;。]", output):
+            paths = paths_in(line)
+            if not paths:
+                continue
+            if claims_delete(line) and not claims_write(line) and not any(k in line for k in ("保留", "keep", "未删")):
+                for path in paths:
+                    target = Path(path).expanduser()
+                    gone = not target.exists()
+                    checks.append(
+                        {
+                            "name": f"file:{target.name}",
+                            "ok": gone,
+                            "detail": "已按声明删除" if gone else f"声明已删但仍存在：{path}",
+                            "hard": not gone,
+                        }
+                    )
+            elif claims_write(line):
+                for path in paths:
+                    checks.append(check_file(path))
     return checks
 
 
