@@ -95,6 +95,8 @@ class Config:
     pipeline_repair_rounds: int = 1    # 核验未通过时允许修复的轮数
     pipeline_deadline_seconds: float = 0.0  # 0=不限；一条任务走流水线的整体时限
     pipeline_only_risk: bool = True  # 只有高风险任务进三阶段，其余走单循环
+    guard_abort_seconds: float = 1800.0  # 单次运行硬上限，0=关闭；防跑飞
+    guard_warn_tokens: int = 500_000  # 单次运行 token 超此值只告警不拦
     calibration_sample_rate: float = 0.1  # 分流标定采样率：按此比例落任务原文供离线回放
     skills_dir: Path = field(
         default_factory=lambda: Path(
@@ -267,6 +269,9 @@ def load_config(path: str | Path | None = None) -> Config:
             cfg.calibration_sample_rate = min(
                 1.0, max(0.0, float(pipeline.get("sample_rate", cfg.calibration_sample_rate)))
             )
+        guard = data.get("guard") or {}
+        cfg.guard_abort_seconds = max(0.0, float(guard.get("abort_seconds", cfg.guard_abort_seconds)))
+        cfg.guard_warn_tokens = max(0, int(guard.get("warn_tokens", cfg.guard_warn_tokens)))
         cfg.max_steps = int(data.get("max_steps", cfg.max_steps))
         cfg.max_calls = max(0, int(data.get("max_calls", cfg.max_calls)))
         cfg.max_tokens = max(0, int(data.get("max_tokens", cfg.max_tokens)))

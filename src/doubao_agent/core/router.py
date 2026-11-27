@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
 
 # 多步信号：这些词出现，通常意味着一件事里套着另一件事
@@ -23,11 +24,26 @@ DELIVERABLE_WORDS = (
     "清单", "方案", "计划书", "周报", "日报", "作业", "练习", "网页", "网站",
 )
 
-# 高风险信号：一旦涉及就不赌单循环
-RISK_WORDS = (
-    "删除", "删掉", "移除", "支付", "付款", "转账", "下单", "合同", "法律",
-    "财务", "发票", "密钥", "权限", "发布", "上线", "部署", "覆盖", "格式化",
+# 高风险信号：一旦涉及就不赌单循环。带动作比不带动作危险，所以按"动作模式"匹配。
+RISK_PATTERNS = (
+    "删除", "删掉", "删了", "清空", "移除", "销毁", "卸载", "覆盖", "格式化",
+    "支付", "付款", "转账", "汇款", "下单", "签约", "合同", "法律", "财务",
+    "发票", "密钥", "权限", "授权", "吊销", "发布", "上线", "部署", "回滚",
 )
+# 英文/命令式危险动作，按词边界匹配，避免误伤 mention 之类
+RISK_REGEX = re.compile(
+    r"(\brm\b|\brm\s+-rf\b|\bdelete\b|\bdrop\s+(table|database)\b|"
+    r"\btruncate\b|\bchmod\b|\bchown\b|\btransfer\b|\bwire\b|\bsudo\b)",
+    re.IGNORECASE,
+)
+# 否定语境：这些词出现在动作前，说明是在讲"不要做"
+NEGATORS = (
+    "不要", "不能", "不用", "不必", "不需要", "无需", "不准", "禁止", "严禁",
+    "切勿", "请勿", "勿", "别", "不得",
+    "不执行", "不做", "不进行", "不涉及", "不碰", "未执行",
+    "do not", "don't", "dont", "never", "without", "no need to",
+)
+NEGATION_WINDOW = 14
 
 # 用户明确要求核对/证据：单循环做不到自证，直接流水线
 VERIFY_WORDS = ("核验", "核对", "校验", "证据", "引用", "溯源", "验证", "比对")
@@ -46,9 +62,42 @@ STRATUM_LABELS = {
 }
 
 
-def has_risk_signal(task: str) -> bool:
+def _negated(text: str, start: int) -> bool:
+    """动作前面一小段里出现否定词，就当成"不要做"，不计风险。"""
+    prefix = text[max(0, start - NEGATION_WINDOW) : start]
+    if any(word in prefix for word in NEGATORS):
+        return True
+    # "不执行删除""未删除""别删" 这类紧贴动作的单字否定
+    return bool(re.search(r"[不未没勿别]$", prefix.rstrip()))
+
+
+def risk_hit(task: str) -> str:
+    """返回命中的高风险动作（已剔除否定语境），没有则空串。"""
     text = task or ""
-    return any(word in text for word in RISK_WORDS)
+    for word in RISK_PATTERNS:
+        index = text.find(word)
+        while index >= 0:
+            if not _negated(text, index):
+                return word
+            index = text.find(word, index + 1)
+    for match in RISK_REGEX.finditer(text):
+        if not _negated(text, match.start()):
+            return match.group(0)
+    return ""
+
+
+def _live(word: str, text: str) -> bool:
+    """词出现了，且至少有一处不是"不要做"的语境，才算真信号。"""
+    index = text.find(word)
+    while index >= 0:
+        if not _negated(text, index):
+            return True
+        index = text.find(word, index + 1)
+    return False
+
+
+def has_risk_signal(task: str) -> bool:
+    return bool(risk_hit(task))
 
 
 def decide_route(
@@ -65,20 +114,17 @@ def decide_route(
     if len(text) > max_simple_chars:
         reasons.append(f"过长({len(text)}字>{max_simple_chars})")
     for word in MULTI_STEP_WORDS:
-        if word in text:
+        if _live(word, text):
             reasons.append(f"多步信号:{word}")
             break
     lowered = text.lower()
     for word in DELIVERABLE_WORDS:
-        if word in lowered:
+        if _live(word, lowered):
             reasons.append(f"交付物:{word}")
             break
-    risk_hit = ""
-    for word in RISK_WORDS:
-        if word in text:
-            risk_hit = word
-            reasons.append(f"高风险:{word}")
-            break
+    hit = risk_hit(text)
+    if hit:
+        reasons.append(f"高风险:{hit}")
     for word in VERIFY_WORDS:
         if word in text:
             reasons.append(f"要求核验:{word}")
@@ -90,7 +136,7 @@ def decide_route(
     if reasons and len(reasons) == 1 and reasons[0] == "交付物:文件" and len(text) <= max_simple_chars:
         return {"route": "single", "reason": "短任务、单文件产物，硬闸兜底", "risk": False}
     if reasons:
-        return {"route": "pipeline", "reason": "；".join(reasons), "risk": bool(risk_hit)}
+        return {"route": "pipeline", "reason": "；".join(reasons), "risk": bool(hit)}
     return {
         "route": "single",
         "reason": "短问答、单产物、无多步与风险信号",

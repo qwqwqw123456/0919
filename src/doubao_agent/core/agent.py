@@ -283,6 +283,8 @@ class Agent:
         sample_rate: float = 0.1,
         selfcheck_rounds: int = 1,
         pipeline_only_risk: bool = True,
+        guard_abort_seconds: float = 1800.0,
+        guard_warn_tokens: int = 500_000,
     ) -> None:
         self.registry = registry
         self.provider = provider
@@ -293,6 +295,9 @@ class Agent:
         self.max_steps = max_steps
         self.selfcheck_rounds = max(0, int(selfcheck_rounds))
         self.pipeline_only_risk = bool(pipeline_only_risk)
+        self.guard_abort_seconds = float(guard_abort_seconds)
+        self.guard_warn_tokens = int(guard_warn_tokens)
+        self._started_at = 0.0
         self.recipes = recipes
         self.record_recipes = record_recipes
         self.planner = planner
@@ -565,6 +570,7 @@ class Agent:
         - 带图片：直接单循环，拆解只看文本会丢图
         """
         self._denied_tools = set()
+        self._started_at = time.monotonic()
         if self.pipeline is None:
             self._route = {"decision": "single", "reason": "未启用流水线", "risk": False}
             return self._with_route(
@@ -618,7 +624,21 @@ class Agent:
         answer = str(result.get("answer") or "")
         if not answer or result.get("status") != "completed":
             return result
+        from .verify import paths_in
+
         checks = check_claimed_paths([{"id": "final", "objective": "", "output": answer}])
+        # 模型闷头写错地方、不吭声时，这段是唯一能抓到的地方：任务点名的文件必须在盘上
+        for path in paths_in(task):
+            target = Path(path).expanduser()
+            if target.suffix and not target.exists():
+                checks.append(
+                    {
+                        "name": f"task_file:{target.name}",
+                        "ok": False,
+                        "detail": f"任务指定路径不存在：{target}",
+                        "hard": True,
+                    }
+                )
         hard = summarize(checks)
         self.audit.append(
             result.get("session_id") or "", "selfcheck",
@@ -723,6 +743,18 @@ class Agent:
         recipe_steps: list[dict[str, Any]] = []
 
         while self.max_steps <= 0 or step < self.max_steps:
+            if self.guard_abort_seconds > 0 and self._started_at:
+                if time.monotonic() - self._started_at > self.guard_abort_seconds:
+                    self.audit.append(
+                        session_id, "guard_abort", seconds=int(time.monotonic() - self._started_at),
+                        limit=int(self.guard_abort_seconds),
+                    )
+                    answer = f"超过单次运行硬上限 {self.guard_abort_seconds:.0f}s，已停止（防跑飞）"
+                    self.sessions.finish(session_id, answer, "incomplete")
+                    return {
+                        "session_id": session_id, "status": "incomplete", "answer": answer,
+                        "steps": step, "usage": self.usage.snapshot(),
+                    }
             if self.cancel_event.is_set():
                 answer = "任务已被取消"
                 self.sessions.finish(session_id, answer, "cancelled")

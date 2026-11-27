@@ -5,6 +5,8 @@ import asyncio
 import glob
 import json
 import os
+import subprocess
+from pathlib import Path
 import signal
 import subprocess
 import sys
@@ -973,6 +975,14 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
                 runtime, cases, workspace, timeout=args.timeout, on_case=_show,
                 concurrency=max(1, int(args.concurrency)),
             )
+            report["env"] = {
+                "model": (runtime.config.model or {}).get("model"),
+                "base_url": (runtime.config.model or {}).get("base_url"),
+                "concurrency": max(1, int(args.concurrency)),
+                "timeout": args.timeout,
+                "commit": _git_commit(),
+                "cwd": str(Path.cwd()),
+            }
             target = save_report(report)
             if args.json:
                 print(json.dumps({k: v for k, v in report.items() if k != "rows"}, ensure_ascii=False, indent=2))
@@ -1118,6 +1128,17 @@ def check_serve_host(host: str, auth_token: str) -> str | None:
         f"监听 {host} 属于对外暴露，但 auth_token 为空，/api/* 将无鉴权开放；"
         "请先配置 auth_token 或改回 127.0.0.1。"
     )
+
+
+def _git_commit() -> str:
+    """评测报告要能对上代码版本，不然两次结果没法比。"""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def main(argv: list[str] | None = None) -> int:

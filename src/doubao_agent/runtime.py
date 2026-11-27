@@ -211,6 +211,8 @@ class Runtime:
             skills=skills,
             sample_rate=config.calibration_sample_rate,
             pipeline_only_risk=config.pipeline_only_risk,
+            guard_abort_seconds=config.guard_abort_seconds,
+            guard_warn_tokens=config.guard_warn_tokens,
         )
         if config.pipeline_enabled:
             agent.pipeline = Pipeline(

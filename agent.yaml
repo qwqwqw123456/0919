@@ -20,6 +20,10 @@ pipeline:
   only_risk: true     # 只有高风险任务走三阶段（拆解+独立核验），保留独立核验
   deadline_seconds: 0  # 0=不限；用户口径：不设时限闸
   sample_rate: 0.1    # 分流标定采样率：按此比例落任务原文供离线回放
+guard:
+  abort_seconds: 1800   # 单次运行硬上限（秒），0=关闭；防通宵跑飞
+  warn_tokens: 500000   # token 超过此值只记告警，不中断
+
 planning:
   # 默认关：开启后每个任务先串一次模型做计划，简单任务纯多一次往返，
   # 且计划畸形时会被判 incomplete。多步重活临时改回 true 再跑。
