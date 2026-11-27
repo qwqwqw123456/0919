@@ -11,6 +11,7 @@ from .script import ScriptSource
 from .skill import SkillSource
 from .system import SystemSource
 from .toolbox import ToolboxSource
+from .voice import VoiceSource
 
 __all__ = [
     "A2ASource",
@@ -26,6 +27,7 @@ __all__ = [
     "SourceError",
     "SystemSource",
     "ToolboxSource",
+    "VoiceSource",
     "browser_specs",
     "desktop_specs",
 ]

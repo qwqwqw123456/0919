@@ -1025,6 +1025,22 @@ async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
         if args.cmd == "schedule":
             return await _schedule_command(runtime, args)
 
+        if args.cmd == "voice":
+            from .types import ToolCall
+
+            if args.voice_cmd == "say":
+                call = ToolCall(call_id="cli", name="voice.say",
+                                arguments={"text": args.text, "filename": args.out})
+            elif args.voice_cmd == "transcribe":
+                call = ToolCall(call_id="cli", name="voice.transcribe",
+                                arguments={"path": args.path})
+            else:
+                call = ToolCall(call_id="cli", name="voice.call",
+                                arguments={"path": args.file, "text": args.text})
+            res = await runtime.registry.call(call)
+            print(res.content if res.ok else f"[error] {res.error}")
+            return 0 if res.ok else 1
+
         if args.cmd == "intake":
             return _intake_command(runtime, args)
 
@@ -1230,6 +1246,16 @@ def main(argv: list[str] | None = None) -> int:
     schedule_parser.add_argument("args", nargs="*", default=[])
     schedule_parser.add_argument("--name", default=None, help="任务名称（仅 add）")
 
+    voice_parser = sub.add_parser("voice", help="语音通道：say 合成 / transcribe 识别 / call 跑一轮通话")
+    voice_sub = voice_parser.add_subparsers(dest="voice_cmd", required=True)
+    v_say = voice_sub.add_parser("say", help="文字 → wav")
+    v_say.add_argument("text")
+    v_say.add_argument("--out", default="")
+    v_trans = voice_sub.add_parser("transcribe", help="音频 → 文字")
+    v_trans.add_argument("path")
+    v_call = voice_sub.add_parser("call", help="跑一轮语音通话（--file 给音频，或用 --text 模拟对方说话）")
+    v_call.add_argument("--file", default="")
+    v_call.add_argument("--text", default="")
     intake_parser = sub.add_parser("intake", help="人话入口：一句话 → 任务卡（--save 直接登记）")
     intake_parser.add_argument("text", nargs="*", default=[], help="一句话交代")
     intake_parser.add_argument("--save", action="store_true", help="直接登记成定时任务")

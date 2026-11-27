@@ -9,13 +9,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
 from ..core.a2a import A2AHandler
 from ..core.watcher import _run_watcher
 from ..runtime import Runtime
+from ..voice.ws import handle_voice_ws
 from ..types import ToolSpec
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -198,6 +199,41 @@ def create_app(config: Config) -> FastAPI:
 
     def rt() -> Runtime:
         return state["runtime"]
+
+    @app.websocket("/voice/ws")
+    async def voice_ws(websocket: WebSocket):
+        """手机/浏览器一路麦：发 PCM16 20ms 帧，收事件 JSON 与回复音频二进制。"""
+        await websocket.accept()
+        runtime = rt()
+        if getattr(runtime, "voice", None) is None:
+            await websocket.send_json({"type": "error", "text": "语音通道未启用"})
+            await websocket.close()
+            return
+        session = runtime.voice.make_session()
+        pending: list[Any] = []
+
+        async def recv():
+            if pending:
+                return pending.pop(0)
+            msg = await websocket.receive()
+            if msg.get("type") == "websocket.disconnect":
+                return None
+            if msg.get("bytes") is not None:
+                return msg["bytes"]
+            return msg.get("text")
+
+        async def send_json(payload):
+            await websocket.send_json(payload)
+
+        async def send_bytes(data):
+            await websocket.send_bytes(data)
+
+        try:
+            await handle_voice_ws(recv, send_json, send_bytes, session)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            session.close()
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:

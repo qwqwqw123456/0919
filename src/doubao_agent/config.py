@@ -76,6 +76,8 @@ class Config:
         )
     )
     permission_mode: str = "guarded"   # auto | guarded | manual
+    voice_enabled: bool = True        # 语音通道：本地 Piper 合成 + faster-whisper 识别
+    voice_config: dict = field(default_factory=dict)  # asr/tts/模型路径等，见 agent.yaml
     toolbox_enabled: bool = True       # 本地安全工具箱通道（~/tools 下的 CLI 以目录方式接入）
     toolbox_catalog: Path = field(
         default_factory=lambda: Path(os.environ.get("AGENT_TOOLBOX_CATALOG") or "")
@@ -221,6 +223,10 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.runs_dir = Path(data.get("runs_dir", cfg.workspace / "runs"))
         cfg.db_path = Path(data.get("db_path", cfg.workspace / ".agent" / "agent.db"))
         cfg.permission_mode = data.get("permission_mode", cfg.permission_mode)
+        voice = data.get("voice") or {}
+        if isinstance(voice, dict):
+            cfg.voice_enabled = bool(voice.get("enabled", cfg.voice_enabled))
+            cfg.voice_config = dict(voice)
         toolbox = data.get("toolbox") or {}
         if isinstance(toolbox, dict):
             cfg.toolbox_enabled = bool(toolbox.get("enabled", cfg.toolbox_enabled))

@@ -42,12 +42,22 @@ from .sources import (
     SkillSource,
     SystemSource,
     ToolboxSource,
+    VoiceSource,
 )
 from .sources.mcp import DEFAULT_HOST_MCP_URL, probe_http_mcp
 from .types import Risk
 
 
+VOICE_SYSTEM = (
+    "你在电话里和用户说话：口语、短句，一次不超过 40 字；先接话再给结论；"
+    "不用列表、不用术语、不加表情符号；没听清就问一句；不复述用户原话；"
+    "需要查东西的事，答应下来并说回头告诉你，不在这通电话里长跑。"
+)
+
+
 @dataclass
+
+
 class Runtime:
     config: Config
     registry: CapabilityRegistry
@@ -67,6 +77,7 @@ class Runtime:
     journal: ToolJournal
     telemetry: Telemetry
     evolution: EvolutionStore | None = None
+    voice: Any = None
     # 正在运行的会话 → 该次运行专属的 Agent（取消只作用于对应会话）
     _runs: dict[str, Agent] = field(default_factory=dict, repr=False, compare=False)
 
@@ -156,6 +167,11 @@ class Runtime:
         knowledge = KnowledgeStore(config.db_path, aembed=aembed)
         registry.add_source(KnowledgeSource(knowledge))
         registry.add_source(SystemSource(config.workspace))
+        voice_src: VoiceSource | None = None
+        if getattr(config, "voice_enabled", True):
+            # 回复函数要用 Runtime 实例，而实例在 build 末尾才构造：先占位，构造后回填
+            voice_src = VoiceSource(lambda text: None, dict(getattr(config, "voice_config", {}) or {}))
+            registry.add_source(voice_src)
         if getattr(config, "toolbox_enabled", True):
 
             named = str(config.toolbox_catalog or "").strip()
@@ -235,7 +251,7 @@ class Runtime:
                 repair_rounds=config.pipeline_repair_rounds,
                 deadline_seconds=config.pipeline_deadline_seconds,
             )
-        return cls(
+        runtime = cls(
             config=config,
             registry=registry,
             provider=provider,
@@ -255,6 +271,26 @@ class Runtime:
             telemetry=telemetry,
             evolution=evolution,
         )
+        if voice_src is not None:
+            voice_src.bind_reply(runtime.voice_reply)
+            runtime.voice = voice_src
+        return runtime
+
+    async def voice_reply(self, text: str, history: list[dict[str, str]] | None = None) -> str:
+        """语音通道的作答：直连模型单轮，不挂工具、不跑 agent 循环。
+
+        电话要的是 1 秒内接话；每句都跑完整 agent 循环会拖到几十秒，
+        需要查东西的活交给后台任务，不在通话里做。
+        """
+        msgs: list[dict[str, Any]] = [{"role": "system", "content": VOICE_SYSTEM}]
+        msgs += [m for m in (history or []) if m.get("role") in ("user", "assistant")][-6:]
+        if not msgs[1:] or msgs[-1].get("role") != "user":
+            msgs.append({"role": "user", "content": text})
+        try:
+            out = await self.provider.complete(msgs, [])
+        except Exception:  # noqa: BLE001 - 通话不因一次推理失败断掉
+            return "我这边卡了一下，你再说一遍好吗？"
+        return str(out.get("content") or "").strip()
 
     async def aclose(self) -> None:
         await self.registry.aclose()
