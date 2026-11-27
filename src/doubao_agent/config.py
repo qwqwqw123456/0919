@@ -76,6 +76,10 @@ class Config:
         )
     )
     permission_mode: str = "guarded"   # auto | guarded | manual
+    toolbox_enabled: bool = True       # 本地安全工具箱通道（~/tools 下的 CLI 以目录方式接入）
+    toolbox_catalog: Path = field(
+        default_factory=lambda: Path(os.environ.get("AGENT_TOOLBOX_CATALOG") or "")
+    )
     script_risk: str = "L1"            # 脚本通道的风险等级：L1 直接执行，L2 起需确认
     script_max_cpu: float = 0.0        # 脚本 CPU 时间上限（秒），0 表示不限
     record_recipes: bool = True        # 成功任务自动录制为可零模型回放的配方
@@ -217,6 +221,12 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.runs_dir = Path(data.get("runs_dir", cfg.workspace / "runs"))
         cfg.db_path = Path(data.get("db_path", cfg.workspace / ".agent" / "agent.db"))
         cfg.permission_mode = data.get("permission_mode", cfg.permission_mode)
+        toolbox = data.get("toolbox") or {}
+        if isinstance(toolbox, dict):
+            cfg.toolbox_enabled = bool(toolbox.get("enabled", cfg.toolbox_enabled))
+            catalog = toolbox.get("catalog")
+            if catalog:
+                cfg.toolbox_catalog = Path(str(catalog)).expanduser()
         cfg.script_risk = data.get("script_risk", cfg.script_risk)
         cfg.script_max_cpu = float(data.get("script_max_cpu", cfg.script_max_cpu))
         cfg.record_recipes = bool(data.get("record_recipes", cfg.record_recipes))

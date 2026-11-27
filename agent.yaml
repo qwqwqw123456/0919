@@ -9,6 +9,10 @@ auto_approve:
     risk: L2
     reason: 仅允许发送给本人
 script_risk: L1
+# 本地安全工具箱：~/tools 下的 54 项 CLI 以「目录 + 受控执行」接入，不逐个铺 schema
+toolbox:
+  enabled: true
+  catalog: toolbox.yaml   # 相对仓库根；不存在则通道自动跳过
 script_max_cpu: 0
 record_recipes: true
 pipeline:

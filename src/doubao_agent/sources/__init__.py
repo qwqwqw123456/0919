@@ -10,6 +10,7 @@ from .native import NativeSource
 from .script import ScriptSource
 from .skill import SkillSource
 from .system import SystemSource
+from .toolbox import ToolboxSource
 
 __all__ = [
     "A2ASource",
@@ -24,6 +25,7 @@ __all__ = [
     "SkillSource",
     "SourceError",
     "SystemSource",
+    "ToolboxSource",
     "browser_specs",
     "desktop_specs",
 ]

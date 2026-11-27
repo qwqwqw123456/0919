@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -40,6 +41,7 @@ from .sources import (
     ScriptSource,
     SkillSource,
     SystemSource,
+    ToolboxSource,
 )
 from .sources.mcp import DEFAULT_HOST_MCP_URL, probe_http_mcp
 from .types import Risk
@@ -154,6 +156,17 @@ class Runtime:
         knowledge = KnowledgeStore(config.db_path, aembed=aembed)
         registry.add_source(KnowledgeSource(knowledge))
         registry.add_source(SystemSource(config.workspace))
+        if getattr(config, "toolbox_enabled", True):
+
+            named = str(config.toolbox_catalog or "").strip()
+            root = Path(__file__).resolve().parents[2]
+            catalog = (Path(named).expanduser() if named else root / "toolbox.yaml")
+            if not catalog.is_absolute():
+                catalog = root / catalog
+            if catalog.is_file():
+                registry.add_source(ToolboxSource(catalog))
+            else:
+                print(f"[warn] 工具箱目录缺失：{catalog}，toolbox 通道跳过", file=sys.stderr)
         registry.add_source(
             A2ASource(allow=list(getattr(config, "a2a_allow", []) or []), token="")
         )
