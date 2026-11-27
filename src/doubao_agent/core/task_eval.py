@@ -49,6 +49,14 @@ def evaluate(case: dict[str, Any], result: dict[str, Any], workspace: Path) -> d
     )
     checks.append({**text_ok, "name": "answer"})
 
+    for spec in accept.get("absent") or []:
+        path = str(spec).replace("{ws}", str(workspace))
+        gone = not Path(path).exists()
+        checks.append(
+            {"name": f"absent:{Path(path).name}", "ok": gone,
+             "detail": "文件已不存在" if gone else f"应删除但仍存在：{path}"}
+        )
+
     for spec in accept.get("files") or []:
         path = str(spec.get("path") or "").replace("{ws}", str(workspace))
         checks.append(
@@ -89,11 +97,16 @@ async def run_tasks(
 ) -> dict[str, Any]:
     """每条用例独立工作区、独立 Agent，按并发窗口跑，互不干扰。"""
     rows: list[dict[str, Any]] = []
+    started_wall = time.time()
     sem = asyncio.Semaphore(max(1, concurrency))
 
     def sub_workspace(case: dict[str, Any]) -> Path:
         target = workspace / str(case["id"])
         prepare_workspace(str(target))
+        for item in case.get("setup") or []:
+            path = Path(str(item["path"]).replace("{ws}", str(target)))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(str(item.get("content") or ""), encoding="utf-8")
         return target
 
     async def one(case: dict[str, Any]) -> None:
@@ -102,11 +115,13 @@ async def run_tasks(
             task_text = str(case["task"]).replace("{ws}", str(case_ws))
             started = time.time()
             try:
-                result = await asyncio.wait_for(runtime.start_run(task_text), timeout=timeout)
-            except asyncio.TimeoutError:
-                result = {"status": "timeout", "answer": "", "usage": {}, "route": {}}
+                # 超时交给单次运行硬上限自己收敛，外部取消会传染 MCP 会话把整批带崩
+                result = await runtime.start_run(task_text, guard_seconds=timeout)
             except Exception as exc:  # noqa: BLE001 - 单条崩溃不能带崩整批评测
-                result = {"status": f"error: {type(exc).__name__}", "answer": "", "usage": {}, "route": {}}
+                result = {
+                    "status": f"error: {type(exc).__name__}: {str(exc)[:200]}",
+                    "answer": "", "usage": {}, "route": {},
+                }
             elapsed = round(time.time() - started, 1)
             verdict = evaluate(case, result, case_ws)
             route = result.get("route") or {}
@@ -144,6 +159,7 @@ async def run_tasks(
         "pass": passed,
         "pass_rate": round(passed / total, 3) if total else 0.0,
         "tokens": tokens,
+        "wall_seconds": round(time.time() - started_wall, 1),
         "by_stratum": {
             key: {**val, "rate": round(val["pass"] / val["total"], 3)} for key, val in by_stratum.items()
         },

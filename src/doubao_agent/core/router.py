@@ -36,6 +36,11 @@ RISK_REGEX = re.compile(
     r"\btruncate\b|\bchmod\b|\bchown\b|\btransfer\b|\bwire\b|\bsudo\b)",
     re.IGNORECASE,
 )
+# "只要说明、不要执行"：这类是知识问答，再怎么带风险字眼也不该进三阶段
+EXPLAIN_ONLY = (
+    "只说明", "只列出", "只回答", "只评估", "只介绍", "只给", "只写", "只讲", "只解释",
+    "仅说明", "仅列出", "仅回答", "仅评估", "只汇报", "只做说明",
+)
 # 否定语境：这些词出现在动作前，说明是在讲"不要做"
 NEGATORS = (
     "不要", "不能", "不用", "不必", "不需要", "无需", "不准", "禁止", "严禁",
@@ -109,6 +114,13 @@ def decide_route(
     text = (task or "").strip()
     if not text:
         return {"route": "single", "reason": "空任务", "risk": False}
+    for word in EXPLAIN_ONLY:
+        if word in text:
+            return {
+                "route": "single",
+                "reason": f"{word}，只要说明不要执行，走单循环",
+                "risk": bool(risk_hit(text)),
+            }
 
     reasons: list[str] = []
     if len(text) > max_simple_chars:

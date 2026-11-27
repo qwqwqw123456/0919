@@ -199,7 +199,7 @@ class CapabilityRegistry:
         for source in self._sources.values():
             try:
                 await source.aclose()
-            except Exception:  # noqa: BLE001 - best-effort shutdown
+            except BaseException:  # noqa: BLE001 - 关停阶段连异常组一起吞，不能让清理把进程带崩
                 pass
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper

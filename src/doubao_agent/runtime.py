@@ -326,10 +326,14 @@ class Runtime:
         session_id: str | None = None,
         on_event: Callable[[dict[str, Any]], Any] | None = None,
         images: list[str] | None = None,
+        guard_seconds: float | None = None,
     ) -> dict[str, Any]:
         """每次运行使用独立 Agent，取消只影响该会话，不波及其他并发任务。"""
         session_id = session_id or self.sessions.create(task)
         agent = self.spawn_agent()
+        if guard_seconds:
+            # 评测逐条上限交给 agent 自己收敛：外部 wait_for 取消会传染 MCP 会话
+            agent.guard_abort_seconds = float(guard_seconds)
         self._runs[session_id] = agent
         try:
             return await agent.run(task, session_id, on_event=on_event, images=images)

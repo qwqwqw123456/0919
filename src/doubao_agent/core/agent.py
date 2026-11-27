@@ -298,6 +298,7 @@ class Agent:
         self.guard_abort_seconds = float(guard_abort_seconds)
         self.guard_warn_tokens = int(guard_warn_tokens)
         self._started_at = 0.0
+        self._fail_streak: dict[str, int] = {}
         self.recipes = recipes
         self.record_recipes = record_recipes
         self.planner = planner
@@ -835,6 +836,20 @@ class Agent:
                 call_id = tc.get("id") or f"call_{step}_{index}"
                 await self._emit(on_event, {"type": "tool_start", "tool": tc["name"]})
                 result = await self._execute(tc["name"], tc.get("arguments") or {}, call_id, session_id, step=step)
+                # 同一工具连续砸两次就别再试同一招，把提示塞回模型，让它换路
+                streak = getattr(self, "_fail_streak", {})
+                if result.ok:
+                    streak.pop(tc["name"], None)
+                else:
+                    streak[tc["name"]] = streak.get(tc["name"], 0) + 1
+                    if streak[tc["name"]] >= 2:
+                        result.error = (
+                            f"{result.error or '调用失败'}｜{tc['name']} 已连续失败 {streak[tc['name']]} 次，"
+                            "不要再重试同一工具同一写法，改用别的工具或一次性脚本，或直接把限制说明给用户"
+                        )
+                        self.audit.append(
+                            session_id, "tool_streak", tool=tc["name"], count=streak[tc["name"]], step=step,
+                        )
                 if not (result.error or "").startswith("permission denied"):
                     recipe_steps.append(
                         {"tool": tc["name"], "arguments": tc.get("arguments") or {}, "ok": result.ok}

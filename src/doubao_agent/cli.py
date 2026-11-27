@@ -851,6 +851,9 @@ async def _parallel_command(runtime: Runtime, args: argparse.Namespace) -> int:
 
 
 async def _run_cli(args: argparse.Namespace, cfg: Config) -> int:
+    if args.cmd == "eval-tasks":
+        # 评测只量本体系闭环，不挂宿主 MCP：它的传输层在不同任务里关停会抛 cancel scope 错，把整批带崩
+        cfg.mcp_auto_discover = False
     runtime = await Runtime.build(cfg, _make_approver())
     try:
         if args.cmd == "tools":
