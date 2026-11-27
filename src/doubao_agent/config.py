@@ -93,7 +93,8 @@ class Config:
     pipeline_max_atoms: int = 6        # 流水线最多拆几个原子步骤
     pipeline_atom_steps: int = 4       # 单个原子步骤最多几轮模型/工具往返
     pipeline_repair_rounds: int = 1    # 核验未通过时允许修复的轮数
-    pipeline_deadline_seconds: float = 240.0  # 一条任务走流水线的整体时限
+    pipeline_deadline_seconds: float = 0.0  # 0=不限；一条任务走流水线的整体时限
+    pipeline_only_risk: bool = True  # 只有高风险任务进三阶段，其余走单循环
     calibration_sample_rate: float = 0.1  # 分流标定采样率：按此比例落任务原文供离线回放
     skills_dir: Path = field(
         default_factory=lambda: Path(
@@ -259,6 +260,7 @@ def load_config(path: str | Path | None = None) -> Config:
             cfg.pipeline_repair_rounds = max(
                 0, int(pipeline.get("repair_rounds", cfg.pipeline_repair_rounds))
             )
+            cfg.pipeline_only_risk = bool(pipeline.get("only_risk", cfg.pipeline_only_risk))
             cfg.pipeline_deadline_seconds = max(
                 0.0, float(pipeline.get("deadline_seconds", cfg.pipeline_deadline_seconds))
             )

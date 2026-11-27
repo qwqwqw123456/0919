@@ -210,6 +210,7 @@ class Runtime:
             tool_retries=config.tool_retries,
             skills=skills,
             sample_rate=config.calibration_sample_rate,
+            pipeline_only_risk=config.pipeline_only_risk,
         )
         if config.pipeline_enabled:
             agent.pipeline = Pipeline(
