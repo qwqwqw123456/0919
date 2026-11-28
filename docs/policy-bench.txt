@@ -1,0 +1,84 @@
+{
+  "workload": {
+    "baseline(写死120s/不重试/2s轮询)": {
+      "ok": 8,
+      "fail": 4,
+      "seconds": 2.459,
+      "avg_s": 0.205
+    },
+    "balanced": {
+      "ok": 12,
+      "fail": 0,
+      "seconds": 4.162,
+      "avg_s": 0.347
+    },
+    "turbo": {
+      "ok": 12,
+      "fail": 0,
+      "seconds": 3.885,
+      "avg_s": 0.324
+    }
+  },
+  "hang": {
+    "baseline(首字节上限=整体120s)": {
+      "detect_after_s": 90.0,
+      "outcome": "RemoteProtocolError"
+    },
+    "balanced(首字节20s)": {
+      "detect_after_s": 20.01,
+      "outcome": "ReadTimeout"
+    },
+    "turbo(首字节8s)": {
+      "detect_after_s": 8.01,
+      "outcome": "ReadTimeout"
+    }
+  },
+  "poll": {
+    "baseline(2.0s)": {
+      "detect_after_s": 2.0,
+      "polls": 2
+    },
+    "balanced(1.0s)": {
+      "detect_after_s": 2.0,
+      "polls": 3
+    },
+    "turbo(0.4s)": {
+      "detect_after_s": 1.2,
+      "polls": 4
+    }
+  },
+  "hang_concurrent": {
+    "baseline(写死120s/不重试/2s轮询)": {
+      "release_after_s": 90.14,
+      "n": 3
+    },
+    "balanced": {
+      "release_after_s": 20.16,
+      "n": 3
+    },
+    "turbo": {
+      "release_after_s": 8.14,
+      "n": 3
+    }
+  },
+  "backoff_note": {
+    "old_linear_s": 1.2,
+    "turbo_exp_s": 0.484,
+    "text": "退避总量（4 次尝试共等）：旧线性 1.20s vs turbo 0.48s"
+  }
+}
+
+=== 汇总 ===
+[workload] baseline(写死120s/不重试/2s轮询)          成功  8/12  失败  4  总   2.46s
+[workload] balanced                           成功 12/12  失败  0  总   4.16s
+[workload] turbo                              成功 12/12  失败  0  总   3.88s
+[hang]     baseline(首字节上限=整体120s)             判死  90.00s  (RemoteProtocolError)
+[hang]     balanced(首字节20s)                   判死  20.01s  (ReadTimeout)
+[hang]     turbo(首字节8s)                       判死   8.01s  (ReadTimeout)
+[poll]     baseline(2.0s)                     发现完成  2.00s  轮询 2 次
+[poll]     balanced(1.0s)                     发现完成  2.00s  轮询 3 次
+[poll]     turbo(0.4s)                        发现完成  1.20s  轮询 4 次
+[hangx3]   baseline(写死120s/不重试/2s轮询)          3 个并发卡死整批释放  90.14s
+[hangx3]   balanced                           3 个并发卡死整批释放  20.16s
+[hangx3]   turbo                              3 个并发卡死整批释放   8.14s
+退避总量（4 次尝试共等）：旧线性 1.20s vs turbo 0.48s

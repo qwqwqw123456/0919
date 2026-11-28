@@ -106,10 +106,13 @@ class ApiSource:
         self.base_url = base_url.rstrip("/")
         self.endpoints = {ep["name"]: ep for ep in endpoints}
         self._client: httpx.AsyncClient | None = None
+        self.policy: Any = None
         self._specs = [self._to_spec(ep) for ep in endpoints]
 
     @classmethod
-    def from_file(cls, name: str, path: str | Path, base_url: str | None = None) -> "ApiSource":
+    def from_file(
+        cls, name: str, path: str | Path, base_url: str | None = None, policy: Any = None
+    ) -> "ApiSource":
         import json
 
         import yaml
@@ -129,7 +132,9 @@ class ApiSource:
         else:
             url, endpoints = _parse_declarative(name, doc)
 
-        return cls(name=name, spec=doc, base_url=base_url or url, endpoints=endpoints)
+        source = cls(name=name, spec=doc, base_url=base_url or url, endpoints=endpoints)
+        source.policy = policy
+        return source
 
     def _to_spec(self, ep: dict[str, Any]) -> ToolSpec:
         desc = ep.get("description") or f"{ep['method']} {ep['path']}"
@@ -190,10 +195,15 @@ class ApiSource:
 
         url = f"{self.base_url}{path}"
         try:
+            net = getattr(self, "policy", None)
             if self._client is None:
-                self._client = httpx.AsyncClient(timeout=60.0, trust_env=True)
+                timeout = net.httpx_timeout("net") if net is not None else 60.0
+                self._client = httpx.AsyncClient(timeout=timeout, trust_env=True)
+            kwargs = {}
+            if net is not None:
+                kwargs["timeout"] = net.httpx_timeout("net")
             response = await self._client.request(
-                ep["method"], url, params=query, headers=headers, json=body
+                ep["method"], url, params=query, headers=headers, json=body, **kwargs
             )
         except Exception as exc:  # noqa: BLE001
             return ToolResult(

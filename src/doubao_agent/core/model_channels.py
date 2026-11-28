@@ -80,12 +80,15 @@ def switch_channel(config_path: str, name: str) -> dict[str, Any]:
     return {"to": name, "model": payload.get("model"), "fallback": old_main.get("model")}
 
 
-async def list_models(channel: dict[str, Any]) -> list[str]:
+async def list_models(channel: dict[str, Any], policy: Any = None) -> list[str]:
     key = resolve_key(channel)
     if not key:
         raise RuntimeError(f"缺少密钥：环境变量 {channel.get('api_key_env') or 'OPENAI_API_KEY'} 未设置")
     base = str(channel.get("base_url") or "").rstrip("/")
-    async with httpx.AsyncClient(base_url=base, timeout=30.0, trust_env=True) as client:
+    timeout = (
+        policy.net.connect_timeout + policy.net.read_timeout if policy is not None else 30.0
+    )
+    async with httpx.AsyncClient(base_url=base, timeout=timeout, trust_env=True) as client:
         resp = await client.get("/models", headers={"Authorization": f"Bearer {key}"})
         resp.raise_for_status()
         body = resp.json()

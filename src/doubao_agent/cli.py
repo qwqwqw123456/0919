@@ -184,6 +184,56 @@ def _usage_command(args: argparse.Namespace, cfg: Config) -> int:
     return 0
 
 
+def _policy_command(args: argparse.Namespace, cfg: Config) -> int:
+    """策略层命令组：show / set / preset / suggest / stats。全部落在 agent.yaml 的 policy 段。"""
+    from .core.netpolicy import PRESETS, Policy, PolicyError
+
+    path = str(cfg.config_path) if str(cfg.config_path) else None
+    perf = Policy(path)
+    cmd = args.policy_cmd
+    try:
+        if cmd == "show":
+            for row in perf.explain():
+                print(f"{row['key']}\t{row['value']}\t[{row['source']}]")
+            print(f"\npreset={perf.snapshot()['preset'] or '(none)'} version={perf.version}")
+            return 0
+        if cmd == "set":
+            items = {}
+            for piece in args.items:
+                if "=" not in piece:
+                    raise PolicyError(f"要写成 key=value：{piece}")
+                k, v = piece.split("=", 1)
+                items[k.strip()] = v.strip()
+            perf.set_many(items)
+            for k in items:
+                fam, name = k.split(".", 1)
+                print(f"{k}={getattr(perf.net if fam == 'net' else perf.model, name)}  (已写入 {path or '内存'})")
+            return 0
+        if cmd == "preset":
+            perf.preset(args.name)
+            print(f"preset={args.name} version={perf.version}")
+            for row in perf.explain():
+                if row["source"].startswith("preset"):
+                    print(f"  {row['key']}={row['value']}")
+            return 0
+        if cmd == "suggest":
+            tips = perf.suggest()
+            if not tips:
+                print("暂无建议：当前没有足够实测延迟，或现有取值已合理。")
+                return 0
+            for tip in tips:
+                print(f"  {tip['key']} → {tip['to']}   （{tip['why']}）")
+            print("\n应用：doubao-agent policy set " + " ".join(f"{t['key']}={t['to']}" for t in tips))
+            return 0
+        if cmd == "stats":
+            print(json.dumps(perf.stats(), ensure_ascii=False, indent=2))
+            return 0
+    except PolicyError as exc:
+        print(f"策略配置不合法：{exc}", file=sys.stderr)
+        return 2
+    return 2
+
+
 def _evolve_command(args: argparse.Namespace, cfg: Config) -> int:
     """自进化命令组：读用量、跑生命周期、蒸馏配方。只改状态位，不删技能文件。"""
     if not cfg.evolution_enabled:
@@ -1372,6 +1422,18 @@ def main(argv: list[str] | None = None) -> int:
     calibrate_parser.add_argument("--chars", default=None, help="候选字符阈值，逗号分隔")
     calibrate_parser.add_argument("--json", action="store_true", help="输出 JSON")
 
+    policy_parser = sub.add_parser(
+        "policy", help="策略层：网络通信 / 模型等待的超时、重试、退避、轮询（改完即生效）"
+    )
+    policy_sub = policy_parser.add_subparsers(dest="policy_cmd", required=True)
+    policy_sub.add_parser("show", help="列出全部策略项：当前值与来源")
+    p_set = policy_sub.add_parser("set", help="改一项或多项，如 model.retries=3 net.read_timeout=20")
+    p_set.add_argument("items", nargs="+", help="key=value，可给多个")
+    p_preset = policy_sub.add_parser("preset", help=f"套预设：{', '.join(['turbo', 'balanced', 'careful'])}")
+    p_preset.add_argument("name")
+    policy_sub.add_parser("suggest", help="按实测延迟给提速/更稳的建议（只建议不改）")
+    policy_sub.add_parser("stats", help="近期调用延迟分位与失败数")
+
     usage_parser = sub.add_parser("usage", help="额度视图：累计 token 用量与总额度余额")
     usage_parser.add_argument("--quota", type=int, default=10_000_000, help="总额度 token（默认 1000 万）")
     usage_parser.add_argument("--detail", action="store_true", help="列出消耗最高的会话")
@@ -1396,6 +1458,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "evolve":
         return _evolve_command(args, cfg)
+
+    if args.cmd == "policy":
+        return _policy_command(args, cfg)
 
     if args.cmd == "model":
         return _model_command(args, cfg)

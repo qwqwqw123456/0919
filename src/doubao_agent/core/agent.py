@@ -273,6 +273,7 @@ class Agent:
         fallback_provider: ModelProvider | None = None,
         provider_retries: int = 1,
         retry_delay: float = 0.2,
+        perf: Any = None,
         model_summary: bool = False,
         journal: ToolJournal | None = None,
         telemetry: Telemetry | None = None,
@@ -321,6 +322,8 @@ class Agent:
         self._live_session_id: str | None = None
         # 端点兜底：默认不降级（不静默换模型），由配置显式开启备用 provider。
         self.fallback_provider = fallback_provider
+        # 策略层（core.netpolicy.Policy）：有它就按策略的重试/退避来等，没有就用旧字段。
+        self.perf = perf
         self.provider_retries = max(0, provider_retries)
         self.retry_delay = max(0.0, retry_delay)
         self.model_summary = model_summary
@@ -361,7 +364,8 @@ class Agent:
             trimmed, digest = _compact(messages, self.context_limit, model_note=model_note)
             _persist_digest(self.memory, digest)
             last_error: Exception | None = None
-            attempts = self.provider_retries + 1
+            model_spec = self.perf.snapshot()["model"] if self.perf is not None else None
+            attempts = (model_spec.retries if model_spec is not None else self.provider_retries) + 1
             for attempt in range(attempts):
                 try:
                     reply = await self.provider.complete(trimmed, tools)
@@ -372,7 +376,10 @@ class Agent:
                     last_error = exc
                     if attempt + 1 >= attempts or not _retryable(exc):
                         break
-                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                    if self.perf is not None:
+                        await asyncio.sleep(self.perf.sleep_backoff("model", attempt + 1))
+                    else:
+                        await asyncio.sleep(self.retry_delay * (attempt + 1))
             if self.fallback_provider is not None:
                 try:
                     reply = await self.fallback_provider.complete(trimmed, tools)

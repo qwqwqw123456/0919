@@ -27,11 +27,24 @@ class HttpHostBridge:
         capabilities_path: str = "/capabilities",
         timeout: float = 120.0,
         client: httpx.AsyncClient | None = None,
+        policy: Any = None,
     ) -> None:
         self.url = url.rstrip("/")
         self.token = token
         self.capabilities_path = capabilities_path
-        self._client = client or httpx.AsyncClient(timeout=timeout, trust_env=True)
+        self.policy = policy
+        if client is not None:
+            self._client = client
+        elif policy is not None:
+            # invoke 是「等模型/宿主干活」，按模型侧超时；能力清单探测按网络侧短超时。
+            self._client = httpx.AsyncClient(
+                timeout=policy.httpx_timeout("model"), trust_env=True
+            )
+        else:
+            self._client = httpx.AsyncClient(timeout=timeout, trust_env=True)
+
+    def _probe_timeout(self) -> Any:
+        return self.policy.net.read_timeout if self.policy is not None else 10.0
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"} if self.token else {}
@@ -50,7 +63,8 @@ class HttpHostBridge:
         """Fetch the host's capability manifest. An empty list means fall back."""
         try:
             response = await self._client.get(
-                f"{self.url}{self.capabilities_path}", headers=self._headers(), timeout=10.0
+                f"{self.url}{self.capabilities_path}", headers=self._headers(),
+                timeout=self._probe_timeout(),
             )
             response.raise_for_status()
             data = response.json()

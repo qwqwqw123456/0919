@@ -93,3 +93,10 @@ a2a_allow:
   - localhost
   - "::1"
 
+
+# 策略层（Policy）：网络通信 / 模型等待 的超时、重试、退避、轮询集中在这里。
+# 改完即生效（运行中的进程每次调用都读最新快照），无需重启；也可用
+# `doubao-agent policy show|set|preset|suggest` 操作。
+# preset: turbo（追延迟） / balanced（默认） / careful（追成功率）
+policy:
+  preset: balanced

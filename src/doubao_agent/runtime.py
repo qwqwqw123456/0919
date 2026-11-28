@@ -17,6 +17,7 @@ from .core.limits import RateLimiter
 from .core.longterm import LongTermMemory
 from .core.memory import MemoryStore
 from .core.permissions import Approver, PermissionPolicy
+from .core.netpolicy import Policy as SpeedPolicy
 from .core.outbound import Notifier, config_from_dict as outbound_config
 from .core.planner import Planner
 from .core.profile import ProfileStore
@@ -83,6 +84,9 @@ class Runtime:
 
     @classmethod
     async def build(cls, config: Config, approver: Approver | None = None) -> "Runtime":
+        # 策略层：网络通信 / 模型等待的超时、重试、退避、轮询集中在一处，运行期可热改。
+        perf_path = str(config.config_path) if str(config.config_path) else None
+        perf = SpeedPolicy(perf_path)
         cache_ttl = config.tool_cache_ttl if config.tool_cache_enabled else 0.0
         registry = CapabilityRegistry(
             cache_ttl=cache_ttl,
@@ -118,6 +122,7 @@ class Runtime:
                 bridge_cfg["url"],
                 bridge_cfg.get("token"),
                 capabilities_path=bridge_cfg.get("capabilities_path", "/capabilities"),
+                policy=perf,
             )
         # All native capabilities (browser, desktop, notifications, clipboard,
         # media, ...) come from one discovered manifest. No hardcoded list.
@@ -199,7 +204,7 @@ class Runtime:
         profile = ProfileStore(config.db_path)
         notifier = Notifier(outbound_config(config.outbound), config.db_path)
         audit = AuditLog(config.runs_dir)
-        provider = build_provider(config.model, bridge)
+        provider = build_provider(config.model, bridge, perf)
         # 备用 provider：默认不降级（不静默换模型）。显式 provider_fallback=mock 用内置 mock；
         # 配置了 model_fallback 块则装配备用真实 provider；两者皆无则 None。
         fallback = None
@@ -208,7 +213,7 @@ class Runtime:
 
             fallback = MockProvider(script=None)
         elif config.model_fallback:
-            fallback = build_provider(config.model_fallback, bridge)
+            fallback = build_provider(config.model_fallback, bridge, perf)
         # 进程级累计计量：只统计不设预算；预算按单次 run 单独开表（见 _run_meter）。
         usage = UsageMeter()
         journal = ToolJournal(config.db_path)
@@ -233,6 +238,7 @@ class Runtime:
             fallback_provider=fallback,
             provider_retries=config.provider_retries,
             retry_delay=config.provider_retry_delay,
+            perf=perf,
             model_summary=config.context_model_summary,
             journal=journal,
             telemetry=telemetry,

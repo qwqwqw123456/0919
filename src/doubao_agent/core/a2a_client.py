@@ -108,10 +108,14 @@ class A2AClient:
         allow: list[str] | None = None,
         timeout: float = 120.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        policy: Any = None,
     ) -> None:
         self.endpoint = check_endpoint(url, allow)
         self.card_url = _card_url(self.endpoint)
         self.token = token
+        self.policy = policy
+        if policy is not None and transport is None:
+            timeout = policy.model.timeout
         self.timeout = timeout
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport, follow_redirects=False)
 
@@ -183,16 +187,30 @@ class A2AClient:
         return await self._rpc("tasks/get", {"id": task_id})
 
     async def wait(
-        self, task_id: str, poll_interval: float = 2.0, max_wait: float = 600.0
+        self, task_id: str, poll_interval: float | None = None, max_wait: float | None = None
     ) -> dict[str, Any]:
+        spec = self.policy.model if self.policy is not None else None
+        if poll_interval is None:
+            poll_interval = spec.poll_interval if spec is not None else 2.0
+        if max_wait is None:
+            max_wait = spec.poll_timeout if spec is not None and spec.poll_timeout else 600.0
         deadline = time.monotonic() + max_wait
+        round_i = 0
         while True:
             task = await self.get(task_id)
             if str(task.get("status", {}).get("state") or "") in TERMINAL_STATES:
                 return task
             if time.monotonic() >= deadline:
                 raise A2AError(f"等待超时（{int(max_wait)}s），task 仍未结束：{task_id}")
-            await asyncio.sleep(max(0.2, poll_interval))
+            # 前 6 轮按固定间隔快查（短任务要快）；之后才逐轮放大到 poll_max（长任务别空转）。
+            if spec is not None:
+                grown = poll_interval if round_i < 6 else min(
+                    spec.poll_max, poll_interval * (1.6 ** (round_i - 5))
+                )
+            else:
+                grown = poll_interval
+            await asyncio.sleep(max(0.2, grown))
+            round_i += 1
 
     async def cancel(self, task_id: str) -> dict[str, Any]:
         return await self._rpc("tasks/cancel", {"id": task_id})

@@ -48,6 +48,7 @@ git clone <仓库地址> && cd doubao-agent
 | `mcp_servers` / `mcp_auto_discover` | 标准 MCP 接入；留空时启动自动探测 `127.0.0.1:8091/mcp` |
 | `bridge` | 通用 REST 宿主桥（当前云电脑未提供，保持 `enabled: false`） |
 | `auth_token` | 控制台 `/api` 鉴权；空表示不鉴权（仅本机） |
+| `policy` | 网络通信 / 模型等待的超时、重试、退避、轮询；`preset: turbo/balanced/careful`，运行中可改即生效 |
 
 ## 常用命令
 
@@ -66,6 +67,7 @@ doubao-agent metrics [--session <ID>] [--detail]  # span 汇总 / 明细、慢�
 doubao-agent audit verify [会话ID] | audit sessions | audit export <会话ID>
 doubao-agent usage [--quota 10000000] [--detail]  # 累计 token 用量与额度余额
 doubao-agent parallel "任务" --review    # 并行执行 + 审阅者合并仲裁
+doubao-agent policy show | set model.retries=3 | preset turbo | suggest | stats
 doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765 且仅绑本机
 ```
 
@@ -74,6 +76,13 @@ doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765 且仅绑
 技能用量自动记账（use / view / 最后使用），按 14 / 30 天阈值流转 active → 闲置 → 归档，
 只改状态位不删文件；成功配方可蒸馏成技能草案放进 `skills/_drafts`，人工确认后再安装。
 详见 [docs/EVOLUTION.md](docs/EVOLUTION.md)；架构方案见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，缺口路线图见 [docs/GAPS.md](docs/GAPS.md)。
+
+## 策略层（自我提速）
+
+超时 / 重试 / 退避 / 轮询 / 连接池统一收进 `policy` 段（`core/netpolicy.py`）。
+`doubao-agent policy set model.retries=3` 运行中即生效，`preset turbo` 一键追延迟。
+实测：端点卡死从 90s 判死压到 8s，异步任务发现完成 2.0s → 1.2s，抖动端点成功率 8/12 → 12/12。
+详见 [docs/POLICY.md](docs/POLICY.md)，基准脚本 `scripts/bench_policy.py`。
 
 ## 可靠性与可观测
 

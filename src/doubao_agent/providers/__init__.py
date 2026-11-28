@@ -15,7 +15,7 @@ class ModelProvider(Protocol):
     async def aclose(self) -> None: ...
 
 
-def build_provider(cfg: dict[str, Any], bridge: Any = None) -> ModelProvider:
+def build_provider(cfg: dict[str, Any], bridge: Any = None, policy: Any = None) -> ModelProvider:
     provider = (cfg or {}).get("provider", "mock")
     if provider in ("host", "doubao", "native"):
         from .host import HostProvider
@@ -53,6 +53,7 @@ def build_provider(cfg: dict[str, Any], bridge: Any = None) -> ModelProvider:
             model=cfg.get("model", "gpt-4o-mini"),
             temperature=float(cfg.get("temperature", 0.2)),
             extra_headers=cfg.get("headers") or {},
+            policy=policy,
         )
     from .mock import MockProvider
 

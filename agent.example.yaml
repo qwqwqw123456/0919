@@ -120,3 +120,20 @@ api_sources: []
 #   enabled: true
 #   capability: embed
 
+
+# 策略层：网络通信 / 模型等待的超时、重试、退避、轮询。
+# 优先级：默认 < preset < 本段 < 环境变量 AGENT_POLICY_<族>_<字段>（如 AGENT_POLICY_MODEL_RETRIES=3）。
+# 单改一项：doubao-agent policy set model.retries=3 net.read_timeout=20
+policy:
+  preset: balanced
+  # net:
+  #   connect_timeout: 3        # 建连
+  #   read_timeout: 30          # 两次收包之间
+  #   retries: 1                # 单请求内重试
+  #   backoff_base: 0.15        # 第 n 次重试等 base*2^(n-1)
+  #   retry_on_timeout: false   # 超时默认不重试（卡死时重试=等待翻倍）
+  # model:
+  #   timeout: 120              # 整体
+  #   first_byte: 20            # 首字节
+  #   retries: 1                # 模型级重试
+  #   poll_interval: 1.0        # 异步任务轮询起点

@@ -66,6 +66,7 @@ class ApiSourceConfig:
 
 @dataclass
 class Config:
+    config_path: Path = field(default_factory=lambda: Path(""))
     workspace: Path = field(default_factory=_default_workspace)
     runs_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("AGENT_RUNS_DIR") or _default_workspace() / "runs")
@@ -211,6 +212,7 @@ def load_config(path: str | Path | None = None) -> Config:
         if legacy.exists():
             cfg_path = legacy
 
+    cfg.config_path = cfg_path
     if cfg_path.exists():
         try:
             data = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
