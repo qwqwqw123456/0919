@@ -452,6 +452,46 @@ def create_app(config: Config) -> FastAPI:
     async def tree_diff() -> dict[str, Any]:
         return _tree().diff()
 
+    @app.get("/api/tree/pulse")
+    async def tree_pulse(q: str = "", limit: int = 6) -> dict[str, Any]:
+        """任务文本 → 推演路径（T0→T4），页面据此跑流光。"""
+        return _tree().pulse(q, limit=max(1, min(limit, 10)))
+
+    @app.get("/api/tree/tools")
+    async def tree_tools(no: int = 0) -> dict[str, Any]:
+        state = _tree().state()
+        if no:
+            cat = state["cats"].get(str(no))
+            if cat is None:
+                raise HTTPException(status_code=404, detail=f"没有第 {no} 类")
+            return {"ok": True, "no": no, "tools": cat.get("tools_detail") or [],
+                    "fails": cat.get("fails") or 0, "fail_last": cat.get("fail_last"),
+                    "host": state["host"]}
+        return {"ok": True, "tools": state["tool_totals"], "host": state["host"],
+                "strategy": state["strategy"]}
+
+    @app.get("/api/tree/fails")
+    async def tree_fails(no: int = 0) -> dict[str, Any]:
+        data = _tree().fails()
+        if no:
+            return {"ok": True, "traces": [t for t in data["traces"] if t["no"] == no]}
+        return data
+
+    @app.get("/api/tree/strategy")
+    async def tree_strategy_get() -> dict[str, Any]:
+        return {"ok": True, **_tree().strategy()}
+
+    @app.post("/api/tree/strategy")
+    async def tree_strategy_set(payload: dict[str, Any]) -> dict[str, Any]:
+        text = str((payload or {}).get("text") or "")
+        strat = await asyncio.to_thread(_tree().save_strategy, text)
+        # 立刻灌进权限层，下一次工具调用就按新策略拦
+        try:
+            rt().agent.policy.deny = _tree().deny_rules()
+        except Exception:  # noqa: BLE001 - 热更新失败不回滚已保存策略
+            pass
+        return {"ok": True, **strat}
+
     @app.post("/api/tree/triage")
     async def tree_triage(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         from ..core.freshness import triage_markdown

@@ -238,6 +238,9 @@
   .treehits .hit b{color:#cfd7e5;font-weight:600}
   .treehits .hit .meta{color:#596274;font-size:10px}
   .treehits .hit .note{color:#93a0b4;margin-top:2px}
+  .treeflow{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid rgba(94,234,212,.35);border-radius:9px;background:rgba(94,234,212,.07);color:#bff7ee;font-size:11.5px}
+  .treeflow b{color:#5eead4;font-weight:600}
+  .treeflow .fx{cursor:pointer;color:#8fa3bf}
   .treeframe{flex:1;width:100%;border:1px solid var(--line);border-radius:12px;background:#0b0f17}
   .trrow{display:grid;grid-template-columns:26px 10px 1fr 44px 26px;gap:8px;align-items:center;
     padding:5px 2px;border-bottom:1px solid var(--line);cursor:default}
@@ -502,7 +505,7 @@
             <div id="cronList"></div>
           </div>
         </div>
-      </section>
+        </section>
 
       <section class="view" id="v-metrics">
         <div class="stats">
@@ -524,6 +527,18 @@
       </section>
 
       <section class="view" id="v-policy">
+        <div class="card" style="margin-top:12px">
+          <div class="head"><h2>图谱策略 · 自然语言</h2><span class="count" id="treeStratMeta"></span>
+            <div class="right"><button class="tiny" id="treeStratSave">保存并生效</button></div></div>
+          <div class="pad">
+            <textarea id="treeStratText" spellcheck="false" placeholder="例如：禁止使用任何破坏性 Payload，优先走无文件攻击" style="width:100%;min-height:74px;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;color:var(--tx);padding:10px 12px;font-size:12.5px;line-height:1.7;resize:vertical;outline:none"></textarea>
+            <div id="treeStratTags" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px"></div>
+            <div class="dim" id="treeStratHint" style="font-size:11px;margin-top:8px;line-height:1.7">
+              策略写进权限层：保存后，命中标记的工具调用在命中参数时会直接被拒（不进审批），图谱工具台账同步打上“策略禁”。
+            </div>
+          </div>
+        </div>
+            
         <div class="two">
           <div class="card">
             <div class="head"><h2>策略表</h2><span class="count" id="policyMeta"></span>
@@ -536,7 +551,7 @@
             <div class="pad" id="policyStats"></div>
           </div>
         </div>
-      </section>
+</section>
 
       <section class="view" id="v-tree">
         <div class="treebar">
@@ -550,6 +565,7 @@
           <button class="tiny" id="treeExportBtn">导出 JSON</button>
           <button class="tiny" id="treeReloadBtn">刷新图谱</button>
         </div>
+        <div id="treeFlow" class="treeflow" style="display:none"></div>
         <div class="treehits" id="treeHits" style="display:none"></div>
         <iframe id="treeFrame" class="treeframe" src="/static/tree.html?embed=1&v=1" title="29 类依赖图谱"></iframe>
       </section>
@@ -625,7 +641,8 @@ window.go = function (name) {
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + name));
   ({overview: loadOverview, task: loadTask, tools: loadTools, kb: loadKB, cron: loadCron,
     metrics: loadMetrics, skills: loadSkills, policy: loadPolicy,
-    tree: () => { loadTreeFrame(); treeReload(); }}[name] || (() => {}))();
+    tree: () => { loadTreeFrame(); treeReload(); },
+    policy: () => { loadPolicy(); loadTreeStrategy(); }}[name] || (() => {}))();
 };
 $('nav').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-view]');
@@ -1016,6 +1033,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const q = treeQ.value.trim();
       if (!q) { box.style.display = 'none'; box.innerHTML = ''; return; }
       qTimer = setTimeout(async () => {
+        if (Date.now() - (window.__treePulseAt || 0) < 1200) return;  // 刚按回车推演，别用词条命中把它盖掉
         try {
           const r = await api('/api/tree/lookup?q=' + encodeURIComponent(q) + '&limit=8');
           if (!r.ok || !r.hits.length) {
@@ -1032,6 +1050,42 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 260);
     });
   }
+  const stratSave = $('treeStratSave');
+  if (stratSave) stratSave.addEventListener('click', async () => {
+    stratSave.disabled = true;
+    try {
+      const r = await post('/api/tree/strategy', {text: $('treeStratText').value});
+      renderTreeStrategy(r);
+      toast(`策略已生效：禁 ${(r.deny || []).length} · 优先 ${(r.prefer || []).length}`);
+      loadTreeFrame();
+    } catch (e) { toast('保存失败：' + e.message); }
+    stratSave.disabled = false;
+  });
+  if (treeQ) treeQ.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const q = treeQ.value.trim();
+    if (!q) return;
+    window.__treePulseAt = Date.now();
+    try {
+      const r = await api('/api/tree/pulse?q=' + encodeURIComponent(q) + '&limit=8');
+      const f = $('treeFrame');
+      if (f && f.contentWindow) f.contentWindow.postMessage({treePulse: r}, '*');
+      const flow = $('treeFlow');
+      if (flow) {
+        if (r.ok) {
+          flow.style.display = 'flex';
+          flow.innerHTML = `<b>▶ 推演路径 ${r.steps} 步</b> ${esc(r.query || '')}
+            <span style="color:#6f9c94">推理链·未执行</span>
+            <span>${r.nodes.map(n => `T${n.tier} #${n.no} ${esc(n.short || n.name)}`).join(' <span style="color:#3d6a64">→</span> ')}</span>
+            <span class="spacer" style="flex:1"></span><span class="fx" id="treeFlowX">✕</span>`;
+          const x = $('treeFlowX'); if (x) x.onclick = () => { flow.style.display = 'none'; };
+        } else {
+          flow.style.display = 'flex';
+          flow.innerHTML = `<b style="color:#ff9aa2">推演没走通</b> ${esc(r.reason || '没命中')}`;
+        }
+      }
+    } catch (err) {}
+  });
   on('treeReloadBtn', () => { loadTreeFrame(); treeReload(); });
   on('treeScanBtn', async (e) => {
     const b = e.currentTarget; b.disabled = true;
@@ -1064,6 +1118,27 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) { toast('导出失败：' + err.message); }
   });
 });
+
+/* 图谱策略：自然语言 → 禁/优先标记 → 权限层 */
+function renderTreeStrategy(r) {
+  const meta = $('treeStratMeta');
+  if (meta) meta.textContent = `${(r.deny || []).length} 禁 · ${(r.prefer || []).length} 优先 · ${r.updated || '未设置'}`;
+  const box = $('treeStratTags');
+  if (!box) return;
+  const chip = (x, kind) => `<span style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid ${kind === 'deny' ? 'rgba(255,93,108,.45)' : 'rgba(94,234,212,.4)'};color:${kind === 'deny' ? '#ff9aa2' : '#8ef0df'};background:${kind === 'deny' ? 'rgba(255,93,108,.08)' : 'rgba(94,234,212,.07)'}">${kind === 'deny' ? '禁 ' : '优先 '}${esc(x.pattern)}</span>`;
+  box.innerHTML = (r.deny || []).map(x => chip(x, 'deny')).join('') + (r.prefer || []).map(x => chip(x, 'prefer')).join('')
+    || '<span class="dim" style="font-size:11px">还没写策略：所有工具按原权限走</span>';
+}
+async function loadTreeStrategy() {
+  try {
+    const r = await api('/api/tree/strategy');
+    const t = $('treeStratText');
+    if (t && !t.matches(':focus')) t.value = r.text || '';
+    renderTreeStrategy(r);
+  } catch (e) {
+    const meta = $('treeStratMeta'); if (meta) meta.textContent = '策略不可用：' + e.message;
+  }
+}
 
 /* policy *//* policy */
 async function loadPolicy() {

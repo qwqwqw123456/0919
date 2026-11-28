@@ -1,7 +1,7 @@
 """技能树台账：证据折算 A/P/B/C、共现自动加边、导出。"""
 from pathlib import Path
 
-from doubao_agent.core.skilltree import DEFAULT_INDEX, TreeLedger
+from doubao_agent.core.skilltree import DEFAULT_INDEX, TreeLedger, parse_strategy
 
 EXEC_OK = {"event": "tool_call", "tool": "host.sandbox_execute_bash", "ok": True}
 EXEC_FAIL = {"event": "tool_call", "tool": "host.sandbox_execute_bash", "ok": False}
@@ -160,3 +160,68 @@ def test_wordindex_lookup() -> None:
     assert len(res["hits"]) == 5
     assert res["hits"][0]["no"] in range(1, 30)
     assert lookup("", limit=5)["ok"] is False
+
+
+def test_pulse_private_ip_builds_t0_to_t2_path(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    res = ledger.pulse("对 192.168.1.100 进行渗透测试")
+    assert res["ok"] is True
+    assert [n["no"] for n in res["nodes"]][:3] == [1, 2, 3]
+    assert [n["tier"] for n in res["nodes"]][:3] == [0, 1, 2]
+    assert all(seg["kind"] == "curated" for seg in res["segments"])
+
+
+def test_pulse_explicit_category_and_empty(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    assert ledger.pulse("只做 #4 的脱壳")["nodes"][0]["no"] == 4
+    miss = ledger.pulse("今天午饭吃什么")
+    assert miss["ok"] is False and miss["reason"]
+
+
+def test_strategy_parses_destructive_and_fileless() -> None:
+    strat = parse_strategy("禁止使用任何破坏性 Payload，优先走无文件攻击")
+    deny = {d["pattern"] for d in strat["deny"]}
+    prefer = {d["pattern"] for d in strat["prefer"]}
+    assert "sqlmap" in deny and "hydra" in deny
+    assert "powershell" in prefer and "certutil" in prefer
+    assert strat["updated"]
+
+
+def test_strategy_explicit_tool_and_persist(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    saved = ledger.save_strategy("禁止 sqlmap，优先 nuclei")
+    assert [d["pattern"] for d in saved["deny"]] == ["sqlmap"]
+    assert ledger.strategy()["text"] == "禁止 sqlmap，优先 nuclei"
+    rules = ledger.deny_rules()
+    assert rules and rules[0]["pattern"] == "sqlmap"
+    assert "sqlmap" in rules[0]["reason"]
+
+
+def test_tool_detail_and_fail_trace_from_steps(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    ok = {"event": "tool_call", "tool": "toolbox.run", "ok": True, "elapsed_ms": 300,
+          "arguments": {"name": "upx", "args": ["-l", "/tmp/x"]}}
+    bad = {"event": "tool_call", "tool": "toolbox.run", "ok": False, "elapsed_ms": 20,
+           "error": "unsupported", "arguments": {"name": "upx", "args": ["-d", "/tmp/x"]}}
+    ledger.ingest("s6", "判断 /tmp/x 是否加壳", [ok, bad], status="failed")
+    state = ledger.state()
+    cat = state["cats"]["4"]
+    rows = {t["tool"]: t for t in cat["tools_detail"]}
+    assert rows["toolbox.run"]["rate"] == 50
+    assert rows["toolbox.run"]["timeout_s"] == 120
+    assert cat["fails"] == 1
+    tr = cat["fail_last"]
+    assert tr["first_fail"] == 1 and tr["steps"][1]["err"] == "unsupported"
+    assert state["fails"] and state["fails"][0]["no"] == 4
+
+
+def test_state_marks_tool_blocked_by_strategy(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.save_strategy("禁止 sqlmap")
+    ok = {"event": "tool_call", "tool": "toolbox.run", "ok": True, "elapsed_ms": 5,
+          "arguments": {"name": "sqlmap", "args": ["-u", "http://x"]}}
+    ledger.ingest("s7", "对站点做 Web 渗透与 sql 注入验证", [ok], status="completed")
+    cat = ledger.state()["cats"]["2"]
+    hit = [t for t in cat["tools_detail"] if t["tool"] == "toolbox.run"]
+    assert hit and hit[0]["blocked"] is True
+    assert "sqlmap" in hit[0]["blocked_by"]

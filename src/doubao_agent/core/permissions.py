@@ -74,6 +74,7 @@ class PermissionPolicy:
         mode: str | PermissionMode = PermissionMode.GUARDED,
         approver: Approver | None = None,
         rules: list[dict[str, Any] | PolicyRule] | None = None,
+        deny: list[dict[str, Any]] | None = None,
     ) -> None:
         try:
             self.mode = PermissionMode(mode)
@@ -84,11 +85,23 @@ class PermissionPolicy:
             rule if isinstance(rule, PolicyRule) else PolicyRule.from_dict(rule)
             for rule in rules or []
         ]
+        # 自然语言策略编译出来的硬禁止：命中工具名或参数里出现标记就拒，连审批都不进
+        self.deny = [dict(item) for item in (deny or []) if item.get("pattern")]
+
+    def _match_deny(self, spec: ToolSpec, call: ToolCall) -> dict[str, Any] | None:
+        blob = (str(spec.name) + " " + repr(call.arguments or {})).lower()
+        for item in self.deny:
+            if str(item.get("pattern") or "").lower() in blob:
+                return item
+        return None
 
     def _match_rule(self, spec: ToolSpec, call: ToolCall) -> PolicyRule | None:
         return next((rule for rule in self.rules if rule.allows(spec, call)), None)
 
     async def authorize(self, spec: ToolSpec, call: ToolCall) -> Decision:
+        hit = self._match_deny(spec, call)
+        if hit is not None:
+            return Decision(False, False, f"策略禁止（{hit.get('reason') or hit.get('pattern')}）")
         rule = self._match_rule(spec, call)
         if rule is not None:
             return Decision(True, False, f"policy: {rule.reason}")

@@ -340,6 +340,47 @@ def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
         if not edges:
             print("  还没有达标的模板→类别组合（需 ≥3 次且跨 ≥2 会话）")
         return 0
+    if cmd == "pulse":
+        res = ledger.pulse(args.query)
+        if not res.get("ok"):
+            print(f"没走通：{res.get('reason')}", file=sys.stderr)
+            return 2
+        print(f"「{res['query']}」推演路径 {res['steps']} 步：")
+        for i, n in enumerate(res["nodes"]):
+            hit = "、".join(n["hits"])
+            print(f"  {i+1}. T{n['tier']} #{n['no']} {n['name']}（{n['score']}｜{hit}）")
+        for seg in res["segments"]:
+            print(f"     #{seg['from']} → #{seg['to']}  {'实边' if seg['kind']=='curated' else '推导'}")
+        return 0
+    if cmd == "fails":
+        data = ledger.fails()
+        if not data["total"]:
+            print("还没有失败轨迹（证据里没有失败/被拦的步骤）")
+            return 0
+        print(f"失败轨迹 {data['total']} 条（只列最近 {args.limit} 条）")
+        for tr in data["traces"][: args.limit]:
+            print(f"  {tr['at']} #{tr['no']} [{tr['level']}] {tr['session']} {tr['note'][:60]}")
+            steps = tr.get("steps") or []
+            ff = tr.get("first_fail")
+            for i, st in enumerate(steps[:10]):
+                mark = "⊘" if st.get("denied") else ("✗" if not st.get("ok") else "·")
+                at = " ← 卡在这" if ff is not None and i == ff else ""
+                print(f"      {mark} {st.get('t')} {st.get('ms')}ms {str(st.get('err') or '')[:70]}{at}")
+        return 0
+    if cmd == "strategy":
+        if args.clear:
+            strat = ledger.save_strategy("")
+        elif args.text:
+            strat = ledger.save_strategy(args.text)
+        else:
+            strat = ledger.strategy()
+        print(f"策略：{strat.get('text') or '（空）'}  更新 {strat.get('updated') or '-'}")
+        deny = strat.get("deny") or []
+        prefer = strat.get("prefer") or []
+        print(f"  禁止标记 {len(deny)} 个：" + "、".join(sorted({d['pattern'] for d in deny})[:14]))
+        if prefer:
+            print(f"  优先标记 {len(prefer)} 个：" + "、".join(sorted({d['pattern'] for d in prefer})[:14]))
+        return 0
     if cmd == "triage":
         from .core.freshness import triage_markdown
 
@@ -1583,6 +1624,13 @@ def main(argv: list[str] | None = None) -> int:
     tree_sub.add_parser("edges", help="列出由共现自动生成的边")
     tree_sub.add_parser("diff", help="对比最近两份快照：新边/等级变化/证据增量")
     tree_sub.add_parser("tools", help="工具模板台账：模板→类别命中与达标工具边")
+    t_pulse = tree_sub.add_parser("pulse", help="任务文本 → 推演路径（T0→T4）")
+    t_pulse.add_argument("query", help="任务原文，如「对 192.168.1.100 进行渗透测试」")
+    t_fails = tree_sub.add_parser("fails", help="失败轨迹：哪个节点卡住、卡在哪个工具")
+    t_fails.add_argument("--limit", type=int, default=8, help="最多列多少条")
+    t_strat = tree_sub.add_parser("strategy", help="图谱策略（自然语言）：查看或设置禁/优先标记")
+    t_strat.add_argument("--text", default="", help="写入新策略；不给则只看当前")
+    t_strat.add_argument("--clear", action="store_true", help="清空策略")
     t_triage = tree_sub.add_parser("triage", help="给 P 候选生成复现核查单（只读检查，不含利用载荷）")
     t_triage.add_argument("--id", dest="cve", default="", help="只处理某一条 CVE")
     t_triage.add_argument("--out", default="", help="输出 Markdown 路径")

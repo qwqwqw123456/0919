@@ -15,6 +15,7 @@ from dataclasses import fields
 
 from doubao_agent.core.netpolicy import NetPolicy, ModelPolicy, PRESETS, Policy, PolicyError
 from doubao_agent.providers.openai_compat import OpenAICompatProvider
+from doubao_agent.types import Risk, ToolCall, ToolSpec
 
 
 def _yaml(tmp_path, body: str):
@@ -231,3 +232,26 @@ def test_a2a_poll_interval_from_policy():
     # 0.05s 级轮询：0.3s 内至少命中 3 次；写死 2s 的老逻辑只会命中 1 次
     assert polls["n"] >= 3
     assert time.monotonic() - started < 0.8
+
+
+def test_strategy_deny_blocks_even_read_tool():
+    from doubao_agent.core.permissions import Decision, PermissionPolicy
+    from doubao_agent.core.skilltree import parse_strategy
+
+    strat = parse_strategy("禁止使用任何破坏性 Payload")
+    policy = PermissionPolicy("auto", None, None,
+                              deny=[{"pattern": d["pattern"], "reason": "策略禁止"} for d in strat["deny"]])
+    spec = ToolSpec(name="toolbox.run", description="", risk=Risk.READ)
+    call = ToolCall(name="toolbox.run", arguments={"name": "sqlmap", "args": ["-u", "http://t"]})
+
+    async def run():
+        return await policy.authorize(spec, call)
+
+    d = asyncio.run(run())
+    assert d.allowed is False and "策略禁止" in d.reason
+    safe = ToolCall(name="toolbox.run", arguments={"name": "upx", "args": ["-l", "/tmp/x"]})
+    assert asyncio.run(run2(policy, spec, safe)).allowed is True
+
+
+async def run2(policy, spec, call):
+    return await policy.authorize(spec, call)

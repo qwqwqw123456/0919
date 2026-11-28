@@ -68,6 +68,14 @@
 - `doubao-agent tree lookup 提权 --limit 10` 与 `GET /api/tree/lookup?q=&limit=`：在 2667 条索引里按名称/正文子串查找，名称命中优先，返回类/子类/状态/正文摘要。
 - 工作台图谱条右侧输入框同源，输入即查（260ms 防抖，最多 8 条），结果面板显示类与子类、正文前 120 字。
 
+
+## 推演流光 / 工具台账 / 失败轨迹 / 策略（2026-11-29）
+
+- **推演路径**：`GET /api/tree/pulse?q=`、`tree pulse <任务原文>`。用同一套分类词法把任务折成 T0→T4 的节点序列，私网 IP（10./192.168./172.16-31.）额外加权 #1 网络底层与 #3 内网域控；段与段之间标注 `curated`（手绘实边）或 `jump`（推导）。页面只负责点亮与跑虚线，结论固定写“推理链·未执行”，不当成执行记录。
+- **工具台账**：证据里每条 `steps` 记录 `tool/tpl/elapsed_ms/ok/error/denied`；`state.cats[n].tools_detail` 给成功率、均值、P95、超时上限（运行时默认 120s），`host` 给本机 CPU/内存/Agent RSS 快照。`GET /api/tree/tools?no=`、`/api/tree/tools`。
+- **失败轨迹**：`GET /api/tree/fails`、`tree fails`。真失败才计入（运行失败/B/C 级或工具报错），单纯被 L3 权限拦下另记 `denied`，不涂红。`fail_last.first_fail` 指向第一次报错的步骤，页面标“← 卡在这”。
+- **自然语言策略**：`GET/POST /api/tree/strategy`、`tree strategy [--text|--clear]`；落 `tree/strategy.json`。解析成 deny/prefer 标记（破坏性 payload / 暴力破解 / 无文件 / 反弹 shell 会展开成具体工具名），deny 直接灌进 `PermissionPolicy.deny`：命中工具名或参数即拒，不进审批；图谱工具台账同步标“策略禁”。没映射到具体工具的原文保留为标记，页面如实显示。
+
 ## 发布通道（已接通）
 
 - 指针仓库：`qwqwqw123456/sec-tree-go` 的 `pointer.json`（页面里 `PTR` 三源：jsDelivr ×2 + gh-proxy 直读 raw，按 `t` 取最新）。

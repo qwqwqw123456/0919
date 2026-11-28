@@ -188,6 +188,40 @@ mark{background:#26405c;color:#fff;border-radius:3px;padding:0 2px}
 .knrow:hover{background:#132033}
 .wt.pgu1{color:#f7b733!important}
 .wt.pgu2{color:#3ddc97!important}
+/* 推演流光 / 失败轨迹 / 工具台账 */
+.node.flowing{border-color:#5eead4!important;box-shadow:0 0 0 2px rgba(94,234,212,.55),0 0 26px rgba(94,234,212,.45);z-index:3}
+.node.flowing .nm{color:#c7fff4}
+svg path.flowline{stroke:#5eead4;stroke-opacity:.95;stroke-width:3;fill:none;stroke-dasharray:12 8;filter:drop-shadow(0 0 5px rgba(94,234,212,.8));animation:fdash 1s linear infinite}
+@keyframes fdash{to{stroke-dashoffset:-40}}
+.fbad{position:absolute;left:9px;bottom:4px;font-size:9.5px;line-height:14px;color:#ff9aa2;background:#3a1218;border:1px solid #7d2b33;border-radius:4px;padding:0 4px}
+.node.failnode{border-color:#ff5d6c66}
+.node.failnode:hover{box-shadow:0 0 0 2px rgba(255,93,108,.35),0 6px 18px #0008}
+#flowbar{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:70;display:none;max-width:92vw;padding:7px 12px;border-radius:9px;background:rgba(10,24,28,.94);border:1px solid #2d6f66;color:#bff7ee;font-size:12px;box-shadow:0 4px 24px #000a}
+#flowbar b{color:#5eead4}
+#flowbar .fx{float:right;margin-left:12px;cursor:pointer;color:#8fa3bf}
+.embed #flowbar{display:none!important}
+.tbox{margin:10px 0 0;border:1px solid #22334a;border-radius:9px;background:#0a1522;padding:9px 11px}
+.tbox h4{font-size:11.5px;color:#8ecbff;font-weight:600;margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tbox h4 small{color:#6f83a0;font-weight:400}
+.trow2{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:11.5px;padding:5px 0;border-top:1px dashed #1c2a3b;align-items:baseline}
+.trow2:first-of-type{border-top:0}
+.trow2 .nm2{color:#dbe6f3;font-family:ui-monospace,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow2 .rate{text-align:right;font-weight:600}
+.trow2 .sub2{grid-column:1/3;font-size:10.5px;color:#7d90a8;line-height:1.6}
+.trow2 .ok{color:#3ddc97}.trow2 .bad{color:#ff8080}
+.trow2 .blk{color:#ff8080;text-decoration:line-through}
+.tbadge{font-size:10px;padding:0 5px;border-radius:4px;border:1px solid #7d2b33;color:#ff9aa2;background:#2a1014}
+.fbox{margin:10px 0 0;border:1px solid #5c2630;border-radius:9px;background:#150c10;padding:9px 11px}
+.fbox h4{font-size:11.5px;color:#ff9aa2;font-weight:600;margin-bottom:5px}
+.fstep{font-size:11.5px;color:#9db2cc;padding:2px 0;border-top:1px dashed #2a1a20}
+.fstep:first-of-type{border-top:0}
+.fstep i{font-style:normal;margin-right:5px}
+.fstep i.ok{color:#3ddc97}
+.fstep i.no{color:#ff5d6c}
+.fstep em{color:#ff9aa2;font-style:normal}
+.fstep .at{margin-left:6px;color:#ff5d6c;font-size:10.5px}
+.hostline{font-size:11px;color:#7d90a8;margin:6px 0 0}
+.hostline b{color:#8ecbff;font-weight:500}
 .embed header,.embed .legend,.embed .legend-note,.embed .dlbtn{display:none}
 .published .dlbtn{display:none}
 .embed .tools{margin:4px 0 6px;gap:6px}
@@ -211,6 +245,7 @@ mark{background:#26405c;color:#fff;border-radius:3px;padding:0 2px}
 <div class="legend-note">圆点＝证据进度（由证据等级自动派生，换设备一致）：灰 仅边界 / 黄 部分验证 / 绿 已验可复现</div>
 <div class="legend-note">等级：A 已验（本机可复现）· P 部分验 · B 待验（一手来源，用前先自验）· C 边界（不作结论）</div>
 <div class="tree-wrap"><div class="tree" id="tree"><svg id="edges"></svg></div></div>
+<div id="flowbar"></div>
 <div id="iview"></div>
 <div id="detail"><div class="empty">👆 点击任意节点，展开该类的全部子类与词条分布</div></div>
 <script>
@@ -351,10 +386,58 @@ D.tiers.forEach((t,i)=>t.ids.forEach(id=>{
   if(!c){console.warn('missing cat',id);return}
   const el=document.createElement('div');el.className='node';el.style.left=p.x+'px';el.style.top=p.y+'px';
   el.style.setProperty('--tc',t.c);el.dataset.id=id;
-  el.innerHTML='<div class="nm">'+SHORT[id]+'</div><div class="meta">'+c.n+' 条 · '+c.subs.length+' 子类</div><div class="no">#'+id+'</div><div class="ev '+(evOf(id).lv==='A'?'evA':evOf(id).lv==='P'?'evP':evOf(id).lv==='C'?'evC':'evB')+'" title="证据等级：'+({A:'A 已验（本机可复现）',P:'P 部分验（仅覆盖部分子项）',B:'B 待验（用前先自验）',C:'C 边界（禁用作结论）'})[evOf(id).lv]+'">'+evOf(id).lv+'</div>';
+  const fal=evOf(id).fails||0;
+  if(fal) el.classList.add('failnode');
+  el.innerHTML='<div class="nm">'+SHORT[id]+'</div><div class="meta">'+c.n+' 条 · '+c.subs.length+' 子类</div><div class="no">#'+id+'</div><div class="ev '+(evOf(id).lv==='A'?'evA':evOf(id).lv==='P'?'evP':evOf(id).lv==='C'?'evC':'evB')+'" title="证据等级：'+({A:'A 已验（本机可复现）',P:'P 部分验（仅覆盖部分子项）',B:'B 待验（用前先自验）',C:'C 边界（禁用作结论）'})[evOf(id).lv]+'">'+evOf(id).lv+'</div>'
+    +(fal?'<span class="fbad" title="失败/被拦 '+fal+' 次，点开看卡在哪一步">✕'+fal+'</span>':'');
   el.addEventListener('click',()=>select(id));
   tree.appendChild(el);
 }));
+var HOST=meta.host||{};
+var FLOW_LAST=null,FLOW_LOOP=null,FLOW_T=[];
+function clearFlow(stopLoop){
+  FLOW_T.forEach(function(t){clearTimeout(t)});FLOW_T=[];
+  if(stopLoop){clearInterval(FLOW_LOOP);FLOW_LOOP=null;FLOW_LAST=null;}
+  document.querySelectorAll('.node.flowing').forEach(function(e){e.classList.remove('flowing')});
+  svg.querySelectorAll('path.flowline').forEach(function(p){p.remove()});
+  var b=document.getElementById('flowbar'); if(b)b.style.display='none';
+}
+function flowPath(a,b){
+  const x1=pos[a].x+NODEW-2,y1=pos[a].y+NODEH/2,x2=pos[b].x+2,y2=pos[b].y+NODEH/2,dx=(x2-x1)*0.55;
+  return '<path class="flowline" d="M'+x1+','+y1+' C'+(x1+dx)+','+y1+' '+(x2-dx)+','+y2+' '+x2+','+y2+'"/>';
+}
+function runFlow(res){
+  clearFlow(false);
+  var ordered=(res.nodes||[]).map(function(n){return +n.no;});
+  ordered.sort(function(a,b){return colOf[a]-colOf[b]||pos[a].y-pos[b].y;});
+  ordered.forEach(function(id,i){
+    FLOW_T.push(setTimeout(function(){
+      var el=document.querySelector('.node[data-id="'+id+'"]');
+      if(el)el.classList.add('flowing');
+    },i*430));
+  });
+  // 只画“串起来”的那几段，避免把 39 条边全点亮
+  for(var i=0;i<ordered.length-1;i++){
+    if(pos[ordered[i]]&&pos[ordered[i+1]]) svg.insertAdjacentHTML('beforeend',flowPath(ordered[i],ordered[i+1]));
+  }
+  var bar=document.getElementById('flowbar');
+  if(bar){
+    bar.style.display='block';
+    bar.innerHTML='<span class="fx" onclick="clearFlow(true)">✕</span><b>▶ 推演路径</b> '
+      +esc((res.query||'').slice(0,42))+' <span style="color:#6f9c94">推理链·未执行</span><br>'
+      +ordered.map(function(id){return 'T'+colOf[id]+' '+SHORT[id]}).join(' <span style="color:#3d6a64">→</span> ');
+  }
+}
+function applyTreePulse(res){
+  if(!res||!res.ok||!(res.nodes||[]).length){return;}
+  FLOW_LAST=res; runFlow(res);
+  clearInterval(FLOW_LOOP);
+  FLOW_LOOP=setInterval(function(){ if(FLOW_LAST) runFlow(FLOW_LAST); },5600);
+}
+window.applyTreePulse=applyTreePulse;
+window.addEventListener('message',function(e){
+  var d=e.data||{}; if(d.treePulse) applyTreePulse(d.treePulse);
+});
 function ancestors(id){const out=new Set();let changed=true;while(changed){changed=false;D.edges.forEach(([a,b])=>{if((b===id||out.has(b))&&!out.has(a)&&a!==id){out.add(a);changed=true}})}return out}
 function highlight(){
   const anc=sel?ancestors(sel):new Set();
@@ -515,6 +598,38 @@ function openItem(c,s,i,noScroll){curView={c:c,s:s,i:i};
   bindXL(iv);
 }
 
+function hostLine(){
+  if(!HOST||!HOST.mem_total_mb)return '';
+  return '本机 CPU '+HOST.cpu_pct+'% · 内存 '+HOST.mem_used_mb+'/'+HOST.mem_total_mb+' MB · Agent 进程 '+HOST.agent_rss_mb+' MB';
+}
+function toolsHTML(id){
+  var list=(evOf(id).tools)||[];
+  var head='<div class="tbox"><h4>工具台账 · 本类 <small>'+list.length+' 个工具（成功/失败/均值/超时）</small></h4>';
+  if(!list.length)return head+'<div class="hostline">还没有在这类任务里跑过工具；等级 B 时用前先自验。</div><div class="hostline">'+hostLine()+'</div></div>';
+  return head+list.map(function(t){
+    var blocked=t.blocked;
+    return '<div class="trow2" title="最近一次 '+(t.last_ts?new Date(t.last_ts*1000).toLocaleString('zh-CN'):'-')+(t.error?' · 错误：'+esc(t.error):'')+'">'
+      +'<span class="nm2'+(blocked?' blk':'')+'">'+esc(t.tool)+'</span>'
+      +'<span class="rate '+(t.rate>=80?'ok':t.rate>=40?'':'bad')+'">'+t.rate+'%</span>'
+      +'<span class="sub2">'+t.calls+' 次（成 '+t.ok+' / 败 '+t.fail+'）· 均值 '+t.avg_ms+'ms · P95 '+t.p95_ms+'ms · 超时 '+t.timeout_s+'s'
+      +(blocked?' <span class="tbadge">策略禁 '+esc(t.blocked_by)+'</span>':'')+'</span>'
+      +'</div>';
+  }).join('')+'<div class="hostline">'+hostLine()+'</div></div>';
+}
+function failHTML(id){
+  var tr=evOf(id).fail_last;
+  if(!tr)return '';
+  var steps=(tr.steps||[]).slice(0,10);
+  var body=steps.length?steps.map(function(st,i){
+    var no=!st.ok;
+    return '<div class="fstep"><i class="'+(no?'no':'ok')+'">'+(no?'✕':'✓')+'</i>'
+      +esc(st.t||'')+(st.tpl?' · '+esc(st.tpl):'')+' · '+(st.ms||0)+'ms'
+      +(st.err?' <em>'+esc(String(st.err).slice(0,80))+'</em>':'')
+      +(i===tr.first_fail?'<span class="at">← 卡在这</span>':'')+'</div>';
+  }).join(''):'<div class="fstep">失败工具：'+esc((tr.tools_fail||[]).join('、')||'无执行证据')+'</div>';
+  return '<div class="fbox"><h4>失败轨迹 · '+esc(tr.at)+' · '+esc(tr.session)+' · 等级 '+esc(tr.level)+'</h4>'
+    +'<div class="fstep"><em>'+esc(tr.note||'')+'</em></div>'+body+'</div>';
+}
 function select(id,noscroll){
   sel=id;document.querySelectorAll('.node').forEach(el=>el.classList.toggle('sel',+el.dataset.id===id));highlight();
   const c=D.cats[String(id)];const t=D.tiers[colOf[id]];
@@ -525,7 +640,7 @@ function select(id,noscroll){
     +'<div>证据等级：<b>'+ev.lv+'</b> · '+ev.note+'</div>'+triHTML(SX[id+'-'+(si+1)])
     +(ev.cmd?'<div>证据文件：'+evCmd(ev.cmd)+'</div>':'')
     +'<div class="wl">'+(s.items&&s.items.length?chipsOf(s.items,id,si,c.subs.length===1):'<i>原文此子类无词条</i>')+'</div></div></div>').join('');
-  document.getElementById('detail').innerHTML='<div class="dh"><span style="color:'+t.c+';font-size:20px">◆</span><h2>第'+id+'类 · '+c.nm+'</h2><span class="badge">'+t.t+'</span><span class="badge">'+c.n+' 词条</span><span class="badge">'+c.subs.length+' 子类</span><span class="badge" style="color:'+(evOf(id).lv==='A'?'#3ddc97':evOf(id).lv==='P'?'#8ecbff':evOf(id).lv==='C'?'#ffb366':'#8fa3bf')+'">证据 '+evOf(id).lv+'</span><span class="hint">前置依赖已高亮</span></div><div class="db"><div class="evrow '+evOf(id).lv+'"><b>证据 '+evOf(id).lv+'</b> · '+evOf(id).note+(evOf(id).cmd?evCmd(evOf(id).cmd):'')+'</div>'+triHTML(CX[id])+(+id===27||+id===29?'<div class="rvnote">本类 '+(+id===27?29:9)+' 条正文含明确年份，词条卡已标「来源年份」；其余讲机制与手法，不带时效数字，故不标。</div>':'')+(id===25?c25HTML():'')+'<div class="strow">状态分布：'+(function(){const sc={frontier:0,active:0,legacy:0,core:0};c.subs.forEach((ss,si)=>ss.items.forEach((nm,ii)=>sc[stOf(+id,si+1,ii+1)]++));return '<b>'+sc.frontier+'</b> 前沿 · <b>'+sc.active+'</b> 现行 · <b>'+sc.core+'</b> 底层不变 · <b>'+sc.legacy+'</b> 已弃用';})()+'</div>'+subs+'</div>';
+  document.getElementById('detail').innerHTML='<div class="dh"><span style="color:'+t.c+';font-size:20px">◆</span><h2>第'+id+'类 · '+c.nm+'</h2><span class="badge">'+t.t+'</span><span class="badge">'+c.n+' 词条</span><span class="badge">'+c.subs.length+' 子类</span><span class="badge" style="color:'+(evOf(id).lv==='A'?'#3ddc97':evOf(id).lv==='P'?'#8ecbff':evOf(id).lv==='C'?'#ffb366':'#8fa3bf')+'">证据 '+evOf(id).lv+'</span><span class="hint">前置依赖已高亮</span></div><div class="db"><div class="evrow '+evOf(id).lv+'"><b>证据 '+evOf(id).lv+'</b> · '+evOf(id).note+(evOf(id).cmd?evCmd(evOf(id).cmd):'')+'</div>'+toolsHTML(id)+failHTML(id)+triHTML(CX[id])+(+id===27||+id===29?'<div class="rvnote">本类 '+(+id===27?29:9)+' 条正文含明确年份，词条卡已标「来源年份」；其余讲机制与手法，不带时效数字，故不标。</div>':'')+(id===25?c25HTML():'')+'<div class="strow">状态分布：'+(function(){const sc={frontier:0,active:0,legacy:0,core:0};c.subs.forEach((ss,si)=>ss.items.forEach((nm,ii)=>sc[stOf(+id,si+1,ii+1)]++));return '<b>'+sc.frontier+'</b> 前沿 · <b>'+sc.active+'</b> 现行 · <b>'+sc.core+'</b> 底层不变 · <b>'+sc.legacy+'</b> 已弃用';})()+'</div>'+subs+'</div>';
   {const _d=document.getElementById('detail');
    if(c.subs.length<=6){_d.querySelectorAll('.sub-item').forEach(e=>e.classList.add('open'));}
    else{const _f=_d.querySelector('.sub-item');if(_f)_f.classList.add('open');}}
@@ -767,7 +882,10 @@ goHash(); window.addEventListener('hashchange',()=>{goHash();});
   },160);};
   document.getElementById('qclr').onclick=()=>{q.value='';curQ='';box.style.display='none';applyFilter();syncNote();q.focus();};
   q.onkeydown=e=>{
-    if(e.key==='Enter'){const h=searchIdx(q.value);if(h.length){select(h[0].id);box.style.display='none'}}
+    if(e.key==='Enter'){const h=searchIdx(q.value);if(h.length){select(h[0].id);box.style.display='none'}
+      var v=q.value.trim();
+      if(v){ fetch('/api/tree/pulse?q='+encodeURIComponent(v),{headers:TOKENH}).then(function(r){return r.ok?r.json():null}).then(function(j){if(j)applyTreePulse(j);}).catch(function(){}); }
+    }
     if(e.key==='Escape'){document.getElementById('qclr').click()}
   };
   document.getElementById('expx').onclick=()=>{

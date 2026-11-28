@@ -283,6 +283,11 @@ class Runtime:
             voice_src.bind_reply(runtime.voice_reply)
             runtime.voice = voice_src
         runtime.tree = TreeLedger(Path(config.workspace) / "tree")
+        try:
+            # 图谱策略里的硬禁止直接灌进权限层：命中即拒，不进审批
+            policy.deny = runtime.tree.deny_rules()
+        except Exception as exc:  # noqa: BLE001 - 策略读不出来不影响启动
+            print(f"[warn] 策略装载失败：{exc}", file=sys.stderr)
         return runtime
 
     async def voice_reply(self, text: str, history: list[dict[str, str]] | None = None) -> str:
