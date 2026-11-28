@@ -448,7 +448,7 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/api/tree/triage")
     async def tree_triage(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        from .core.freshness import triage_markdown
+        from ..core.freshness import triage_markdown
 
         only = str((payload or {}).get("id", "") or "")
         path = await asyncio.to_thread(triage_markdown, _tree(), None, only=only)

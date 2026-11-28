@@ -144,3 +144,12 @@ def test_tree_download_serves_agent_index(tmp_path) -> None:
         body = r.json()
         assert body["total"] == 2667 and len(body["cats"]) == 29
         assert client.get("/api/tree/download?which=nope").status_code == 400
+
+
+def test_tree_diff_and_triage_endpoints(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        diff = client.get("/api/tree/diff").json()
+        assert "ok" in diff
+        r = client.post("/api/tree/triage", json={})
+        assert r.status_code == 200 and r.json()["ok"] is True
+        assert "KEV 候选复现核查单" in r.json()["markdown"]
