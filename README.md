@@ -84,6 +84,19 @@ doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765 且仅绑
 实测：端点卡死从 90s 判死压到 8s，异步任务发现完成 2.0s → 1.2s，抖动端点成功率 8/12 → 12/12。
 详见 [docs/POLICY.md](docs/POLICY.md)，基准脚本 `scripts/bench_policy.py`。
 
+## 控制台工作台
+
+`doubao-agent serve` 打开 `http://127.0.0.1:8765` 即是一个多视图工作台，左侧导航对应后端真实接口：
+
+- **概览**：工具数 / 通道在线 / 会话数 / 平均耗时，最近任务、通道健康、最慢调用。
+- **任务**：会话列表 + 执行详情四切页（审计时间线、消息、产物、span 耗时），可一键恢复或取消（`/api/sessions/{id}/resume|cancel`）。
+- **工具**：33 个能力按 L0–L3 风险筛选、关键词搜索，点开看 input schema。
+- **知识库**：列表 / 新增（带 7 类 domain）/ 删除 / 语义检索（`/api/knowledge`、`/api/knowledge/search`）。
+- **定时**：cron 任务的增删、启停开关、立即触发（`/api/schedules`）。
+- **指标**：span 总量、失败数、最慢 5 条、按工具与按类型分布（`/api/metrics`）。
+- **技能**：本地技能清单与风险级别（`/api/skills`）。
+- **策略**：22 项 network/model 参数在线查看来源并热改，`turbo / balanced / careful` 一键切换，实测 p50/p90 与建议可套用（`/api/policy`、`/api/policy/set`、`/api/policy/preset`）。
+
 ## 可靠性与可观测
 
 - 工具执行写入 `tool_runs`：同会话内幂等工具（L0/L1）按「工具 + 参数指纹」命中成功记录时直接回放，不再重复执行；L2/L3 永不重放。

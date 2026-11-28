@@ -56,6 +56,25 @@ def test_metrics_and_trace_endpoints(tmp_path) -> None:
         assert trace.json() == []
 
 
+def test_policy_endpoints_expose_and_apply(tmp_path) -> None:
+    cfg = _config(tmp_path)
+    policy_path = tmp_path / "agent.yaml"
+    policy_path.write_text("policy:\n  preset: balanced\n", encoding="utf-8")
+    cfg.config_path = policy_path
+    with TestClient(create_app(cfg)) as client:
+        body = client.get("/api/policy").json()
+        assert "balanced" in body["presets"]
+        assert len(body["rows"]) >= 20
+        assert body["path"].endswith("agent.yaml")
+        assert client.post("/api/policy/preset", json={"name": "nope"}).status_code == 400
+        assert client.post("/api/policy/set", json={"items": {}}).status_code == 400
+        assert client.post("/api/policy/set", json={"items": {"nope.x": 1}}).status_code == 400
+        ok = client.post("/api/policy/set", json={"items": {"model.retries": 3}})
+        assert ok.status_code == 200
+        rows = client.get("/api/policy").json()["rows"]
+        assert any(r["key"] == "model.retries" and int(r["value"]) == 3 for r in rows)
+
+
 def test_run_endpoint_rejects_without_token(tmp_path) -> None:
     with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
         response = client.post("/api/run", json={"task": "查一下资料"})

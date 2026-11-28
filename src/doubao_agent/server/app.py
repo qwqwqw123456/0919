@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
+from ..core.netpolicy import PRESETS, PolicyError
 from ..core.a2a import A2AHandler
 from ..core.watcher import _run_watcher
 from ..runtime import Runtime
@@ -274,12 +275,17 @@ def create_app(config: Config) -> FastAPI:
         text = (payload or {}).get("text", "").strip()
         if not title or not text:
             raise HTTPException(status_code=400, detail="title and text are required")
-        doc_id = rt().knowledge.add_text(title, text, source=(payload or {}).get("source", ""))
+        doc_id = rt().knowledge.add_text(
+            title,
+            text,
+            source=(payload or {}).get("source", ""),
+            domain=(payload or {}).get("domain", ""),
+        )
         return {"id": doc_id}
 
     @app.get("/api/knowledge/search")
-    async def knowledge_search(q: str = "", limit: int = 4) -> list[dict[str, Any]]:
-        return rt().knowledge.search(q, limit=limit)
+    async def knowledge_search(q: str = "", limit: int = 4, domain: str = "") -> list[dict[str, Any]]:
+        return await rt().knowledge.asearch(q, limit=limit, domain=domain or None)
 
     @app.delete("/api/knowledge/{doc_id}")
     async def knowledge_remove(doc_id: int) -> dict[str, Any]:
@@ -314,6 +320,44 @@ def create_app(config: Config) -> FastAPI:
     @app.get("/api/sessions/{session_id}/trace")
     async def session_trace(session_id: str) -> list[dict[str, Any]]:
         return rt().telemetry.list(session_id)
+
+    def _perf() -> Any:
+        perf = getattr(rt().agent, "perf", None)
+        if perf is None:
+            raise HTTPException(status_code=404, detail="策略层未启用")
+        return perf
+
+    @app.get("/api/policy")
+    async def policy_show() -> dict[str, Any]:
+        perf = _perf()
+        snap = perf.snapshot()
+        return {
+            "preset": snap.get("preset", ""),
+            "version": snap.get("version", 0),
+            "presets": sorted(PRESETS),
+            "rows": perf.explain(),
+            "stats": perf.stats(),
+            "suggest": perf.suggest(),
+            "path": str(perf.path) if perf.path else "",
+        }
+
+    @app.post("/api/policy/preset")
+    async def policy_preset(payload: dict[str, Any]) -> dict[str, Any]:
+        name = str((payload or {}).get("name", "")).strip()
+        try:
+            return _perf().preset(name)
+        except PolicyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/policy/set")
+    async def policy_set(payload: dict[str, Any]) -> dict[str, Any]:
+        items = (payload or {}).get("items")
+        if not isinstance(items, dict) or not items:
+            raise HTTPException(status_code=400, detail="items 需要是 {key: value} 的非空对象")
+        try:
+            return _perf().set_many(items)
+        except PolicyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/sessions/{session_id}/resume")
     async def resume_session(session_id: str) -> dict[str, Any]:
