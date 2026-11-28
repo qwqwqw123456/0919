@@ -13,6 +13,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+# 语音通道：ASR 前置要解音频容器（av 即 PyAV），只测试 say/transcribe 才需要
+voice = ["av>=13.0"]
 
 [project.scripts]
 doubao-agent = "doubao_agent.cli:main"
