@@ -65,6 +65,16 @@ def test_duplicate_session_skipped(tmp_path) -> None:
     assert len(ledger.evidence()) == 1
 
 
+def test_tool_fail_counted_without_becoming_edge(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.ingest("s9", "判断 /tmp/a 是否加壳", [EXEC_FAIL], status="failed")
+    state = ledger.state()
+    cat = state["cats"]["4"]
+    assert cat["tools_fail"]["host.sandbox_execute_bash"] == 1
+    assert cat["tools"] == {}                      # 失败不计成功工具
+    assert state["auto_edges"] == []               # 工具不进边
+
+
 def test_cooccurrence_creates_edge_outside_manual(tmp_path) -> None:
     ledger = _ledger(tmp_path)
     ledger.ingest(

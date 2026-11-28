@@ -296,7 +296,7 @@ class TreeLedger:
         per: dict[int, dict[str, Any]] = {
             no: {"level": c.base_level, "base_level": c.base_level, "ok": 0, "fail": 0,
                  "upgraded": False, "regressed": False, "last_session": "", "note": "",
-                 "hits": [], "tools": {}}
+                 "hits": [], "tools": {}, "tools_fail": {}}
             for no, c in self._cats.items()
         }
         pairs: dict[tuple[int, int], dict[str, Any]] = {}
@@ -311,6 +311,9 @@ class TreeLedger:
                 for tool in row.get("tools_ok") or []:
                     slot.setdefault("tools", {})
                     slot["tools"][tool] = slot["tools"].get(tool, 0) + 1
+                for tool in row.get("tools_fail") or []:
+                    slot.setdefault("tools_fail", {})
+                    slot["tools_fail"][tool] = slot["tools_fail"].get(tool, 0) + 1
                 slot["last_session"] = row.get("session", "")
                 slot["note"] = row.get("note", "")
                 slot["hits"] = (c.get("hits") or [])[:5]

@@ -43,7 +43,7 @@
 
 ## 工具维度
 
-- 证据里的成功工具按类别聚合进 `state.cats[no].tools`（tool → 次数），只做软关联，不生成依赖边。
+- 证据里的成功/失败工具分别聚合进 `state.cats[no].tools` 与 `tools_fail`（tool → 次数），只做软关联，不生成依赖边；工具挂节点前必须先按 `docs/TOOL-ATTRIBUTION.md` 的命令模板归属规范归一。
 
 ## 导出格式
 
