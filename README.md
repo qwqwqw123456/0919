@@ -95,7 +95,7 @@ doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765 且仅绑
 - **定时**：cron 任务的增删、启停开关、立即触发（`/api/schedules`）。
 - **指标**：span 总量、失败数、最慢 5 条、按工具与按类型分布（`/api/metrics`）。
 - **技能**：本地技能清单与风险级别（`/api/skills`）。
-- **图谱**：直接把原「29 类依赖图谱」整页嵌进工作台，数据源换成本地 `/api/tree/export`（EV/自动边实时反映 Agent 回写）；顶部可回写最近任务、抓 CVE 进 P 队列、导出 JSON（`/api/tree`、`/api/tree/ingest`、`/api/tree/scan`、`/api/tree/fresh`、`/api/tree/export`）。
+- **图谱**：直接把原「29 类依赖图谱」整页嵌进工作台，数据源换成本地 `/api/tree/export`（EV/自动边实时反映 Agent 回写）；顶部可回写最近任务、抓 CVE 进 P 队列、导出 JSON（`/api/tree`、`/api/tree/ingest`、`/api/tree/scan`、`/api/tree/fresh`、`/api/tree/export`、`/api/tree/download`）。§ 词条库 2667 条与 Agent 索引已随仓库落在 `data/`，页面下载按钮本地直出。
 - **策略**：22 项 network/model 参数在线查看来源并热改，`turbo / balanced / careful` 一键切换，实测 p50/p90 与建议可套用（`/api/policy`、`/api/policy/set`、`/api/policy/preset`）。
 
 ## 可靠性与可观测

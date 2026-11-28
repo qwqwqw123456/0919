@@ -45,6 +45,12 @@
 
 - 证据里的成功/失败工具分别聚合进 `state.cats[no].tools` 与 `tools_fail`（tool → 次数），只做软关联，不生成依赖边；工具挂节点前必须先按 `docs/TOOL-ATTRIBUTION.md` 的命令模板归属规范归一。
 
+## 词条库与 Agent 索引
+
+- 两份原始 JSON 已落到仓库：`data/sec-words.json`（2667 条词条，136 KB）、`data/sec-agent-index.json`（类/子类/词条三级 + status + 六段正文，1.4 MB，可直接做 RAG）。
+- 本地直出：`GET /api/tree/download?which=words|agent`，图谱页两个下载按钮已指向本地，不再依赖远端 CDN。
+- 索引与 `data/sec-tree-v55.json` 的差别：v55 只给分类与边，agent 索引带每个词条的正文，可用于后续检索/生成，不参与分类打分。
+
 ## 导出格式
 
 与图谱页同构：`{meta, D, EV, edges, auto_edges}`，`EV` 每类带 `lv` 与 `note`，可直接替换页面 meta 做本地预览；**不回写 CDN**（外发动作需确认）。

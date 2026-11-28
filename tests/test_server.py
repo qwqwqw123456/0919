@@ -135,3 +135,12 @@ def test_webhook_rejects_bad_signature(tmp_path) -> None:
 def test_webhook_requires_task(tmp_path) -> None:
     with TestClient(create_app(_config(tmp_path))) as client:
         assert client.post("/api/webhook", json={"event": "x"}).status_code == 400
+
+def test_tree_download_serves_agent_index(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        r = client.get("/api/tree/download?which=agent")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/json")
+        body = r.json()
+        assert body["total"] == 2667 and len(body["cats"]) == 29
+        assert client.get("/api/tree/download?which=nope").status_code == 400

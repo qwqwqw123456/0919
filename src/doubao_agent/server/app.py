@@ -409,6 +409,18 @@ def create_app(config: Config) -> FastAPI:
         payload["_path"] = str(path)
         return payload
 
+    @app.get("/api/tree/download")
+    async def tree_download(which: str = "agent") -> FileResponse:
+        """词条库 / Agent 索引原始 JSON，本地直出，不依赖远端 CDN。"""
+        name = {"agent": "sec-agent-index.json", "words": "sec-words.json"}.get(which)
+        if name is None:
+            raise HTTPException(status_code=400, detail="which 只能是 agent 或 words")
+        path = Path(__file__).resolve().parents[3] / "data" / name
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"缺少 {name}")
+        return FileResponse(path, media_type="application/json",
+                            filename=("网安Agent索引-2667条.json" if which == "agent" else "网安词条库-2667条.json"))
+
     @app.post("/api/sessions/{session_id}/resume")
     async def resume_session(session_id: str) -> dict[str, Any]:
         runtime = rt()
