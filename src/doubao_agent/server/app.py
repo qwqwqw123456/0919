@@ -442,6 +442,12 @@ def create_app(config: Config) -> FastAPI:
         payload["_path"] = str(path)
         return payload
 
+    @app.get("/api/tree/lookup")
+    async def tree_lookup(q: str = "", limit: int = 20) -> dict[str, Any]:
+        from ..core.wordindex import lookup
+
+        return lookup(q, limit=limit)
+
     @app.get("/api/tree/diff")
     async def tree_diff() -> dict[str, Any]:
         return _tree().diff()

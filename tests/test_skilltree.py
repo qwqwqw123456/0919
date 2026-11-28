@@ -150,3 +150,13 @@ def test_export_matches_page_shape(tmp_path) -> None:
     assert set(data) >= {"meta", "D", "EV", "edges", "auto_edges"}
     assert data["EV"]["4"]["lv"] == "A"
     assert len(data["EV"]) == 29
+
+
+def test_wordindex_lookup() -> None:
+    from doubao_agent.core.wordindex import lookup
+
+    res = lookup("提权", limit=5)
+    assert res["ok"] and res["total"] > 20
+    assert len(res["hits"]) == 5
+    assert res["hits"][0]["no"] in range(1, 30)
+    assert lookup("", limit=5)["ok"] is False

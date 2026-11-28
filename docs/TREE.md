@@ -63,6 +63,11 @@
 - 系统兜底：`scripts/tree-fresh-daily.sh`，crontab 每 04:17 跑一次，日志 `tree/fresh-cron.log`。系统盘重启会丢 crontab，重装命令：
   `(crontab -l; echo "17 4 * * * /home/user/Doubao/chats/1413030229010434/doubao-agent/scripts/tree-fresh-daily.sh") | crontab -`
 
+## 词条检索（Agent 索引）
+
+- `doubao-agent tree lookup 提权 --limit 10` 与 `GET /api/tree/lookup?q=&limit=`：在 2667 条索引里按名称/正文子串查找，名称命中优先，返回类/子类/状态/正文摘要。
+- 工作台图谱条右侧输入框同源，输入即查（260ms 防抖，最多 8 条），结果面板显示类与子类、正文前 120 字。
+
 ## 发布快照
 
 - `PYTHONPATH=src python3 scripts/publish_tree.py --out tree-published.html`：把当前 EV/边/自动边内联成自包含 HTML，可直接传 CDN 打开（徽标显示「发布快照」）。

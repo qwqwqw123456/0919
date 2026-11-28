@@ -228,6 +228,16 @@
   .treealert{display:none;font-size:10.5px;color:#f5b97a;border:1px solid rgba(245,185,122,.35);
     background:rgba(245,185,122,.1);padding:2px 7px;border-radius:6px}
   .treediff{font-size:10.5px;color:#7ee7c7}
+  .treeq{flex:0 1 210px;min-width:120px;background:rgba(255,255,255,.04);border:1px solid var(--line);
+    border-radius:7px;color:var(--text);font-size:11px;padding:5px 8px;outline:none}
+  .treeq:focus{border-color:rgba(122,162,255,.6)}
+  .treehits{display:none;flex:0 0 auto;max-height:210px;overflow:auto;border:1px solid var(--line);
+    border-radius:8px;background:rgba(10,15,25,.92);padding:6px 8px;font-size:11px}
+  .treehits .hit{padding:5px 0;border-bottom:1px solid rgba(255,255,255,.045);cursor:default}
+  .treehits .hit:last-child{border-bottom:0}
+  .treehits .hit b{color:#cfd7e5;font-weight:600}
+  .treehits .hit .meta{color:#596274;font-size:10px}
+  .treehits .hit .note{color:#93a0b4;margin-top:2px}
   .treeframe{flex:1;width:100%;border:1px solid var(--line);border-radius:12px;background:#0b0f17}
   .trrow{display:grid;grid-template-columns:26px 10px 1fr 44px 26px;gap:8px;align-items:center;
     padding:5px 2px;border-bottom:1px solid var(--line);cursor:default}
@@ -534,11 +544,13 @@
           <span class="treealert" id="treeAlert"></span>
           <span class="treediff" id="treeDiff"></span>
           <span class="spacer"></span>
+          <input id="treeQ" class="treeq" placeholder="查 2667 条词条/正文…" autocomplete="off" />
           <button class="tiny" id="treeScanBtn">回写最近任务</button>
           <button class="tiny" id="treeFreshBtn">抓 CVE → P</button>
           <button class="tiny" id="treeExportBtn">导出 JSON</button>
           <button class="tiny" id="treeReloadBtn">刷新图谱</button>
         </div>
+        <div class="treehits" id="treeHits" style="display:none"></div>
         <iframe id="treeFrame" class="treeframe" src="/static/tree.html?embed=1&v=1" title="29 类依赖图谱"></iframe>
       </section>
 
@@ -995,6 +1007,31 @@ function treeReload() {
 }
 document.addEventListener('DOMContentLoaded', () => {
   const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  const treeQ = $('treeQ');
+  if (treeQ) {
+    let qTimer = null;
+    treeQ.addEventListener('input', () => {
+      clearTimeout(qTimer);
+      const box = $('treeHits');
+      const q = treeQ.value.trim();
+      if (!q) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      qTimer = setTimeout(async () => {
+        try {
+          const r = await api('/api/tree/lookup?q=' + encodeURIComponent(q) + '&limit=8');
+          if (!r.ok || !r.hits.length) {
+            box.style.display = 'block';
+            box.innerHTML = `<div class="hit meta">没命中「${esc(q)}」</div>`;
+            return;
+          }
+          box.style.display = 'block';
+          box.innerHTML = r.hits.map(h =>
+            `<div class="hit"><b>#${h.no} ${esc(h.name)}</b>
+              <span class="meta"> ${esc(h.sub)} · ${esc(h.status)}</span>
+              <div class="note">${esc((h.note || '').slice(0, 120))}</div></div>`).join('');
+        } catch (e) {}
+      }, 260);
+    });
+  }
   on('treeReloadBtn', () => { loadTreeFrame(); treeReload(); });
   on('treeScanBtn', async (e) => {
     const b = e.currentTarget; b.disabled = true;

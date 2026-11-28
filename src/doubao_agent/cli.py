@@ -318,6 +318,19 @@ def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
         for c in d["level_changes"]:
             print(f"    #{c['no']} {c['from']} → {c['to']}")
         return 0
+    if cmd == "lookup":
+        from .core.wordindex import lookup
+
+        res = lookup(args.query, limit=int(args.limit))
+        if not res.get("ok"):
+            print(res.get("error"), file=sys.stderr)
+            return 2
+        print(f"命中 {res['total']} 条「{res['query']}」")
+        for h in res["hits"]:
+            head = f"#{h['no']} {h['cat']} / {h['sub']} · {h['name']} [{h['status']}]"
+            print(f"  {head}")
+            print(f"    {h['note'][:120]}")
+        return 0
     if cmd == "tools":
         state = ledger.state()
         edges = state["tool_edges"]
@@ -1573,6 +1586,9 @@ def main(argv: list[str] | None = None) -> int:
     t_triage = tree_sub.add_parser("triage", help="给 P 候选生成复现核查单（只读检查，不含利用载荷）")
     t_triage.add_argument("--id", dest="cve", default="", help="只处理某一条 CVE")
     t_triage.add_argument("--out", default="", help="输出 Markdown 路径")
+    t_lookup = tree_sub.add_parser("lookup", help="在 2667 条 Agent 索引里查词条/正文")
+    t_lookup.add_argument("query", help="关键词")
+    t_lookup.add_argument("--limit", type=int, default=10, help="最多返回多少条")
     t_fresh = tree_sub.add_parser("fresh", help="抓公开漏洞源进 P 候选队列（不自动升 A）")
     t_fresh.add_argument("--days", type=int, default=30, help="只看最近 N 天（0=不限）")
     t_fresh.add_argument("--limit", type=int, default=50, help="本次最多入队多少条")
