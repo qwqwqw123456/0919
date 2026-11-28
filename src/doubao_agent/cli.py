@@ -234,6 +234,78 @@ def _policy_command(args: argparse.Namespace, cfg: Config) -> int:
     return 2
 
 
+def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
+    """技能树台账：把运行证据回写到 A/P/B/C，并按共现自动加边。"""
+    from .core.audit import AuditLog
+    from .core.session import SessionStore
+    from .core.skilltree import TreeLedger
+    from .core.telemetry import Telemetry
+
+    ledger = TreeLedger(Path(cfg.workspace) / "tree")
+    if not ledger.ready:
+        print(f"技能树索引缺失或不可读：{ledger.index_path}", file=sys.stderr)
+        return 1
+    cmd = args.tree_cmd
+    if cmd == "status":
+        state = ledger.state()
+        lv = state["levels"]
+        print(
+            f"29 类｜证据 {state['evidence_total']} 条｜A {lv['A']} · P {lv['P']} · "
+            f"B {lv['B']} · C {lv['C']}｜升级 {state['upgraded']}｜自动边 {len(state['auto_edges'])}"
+        )
+        for no in sorted(state["cats"], key=lambda x: int(x)):
+            cat = state["cats"][no]
+            mark = "↑" if cat["upgraded"] else ("!" if cat["regressed"] else " ")
+            print(
+                f"  #{cat['no']:>2} {cat['level']}{mark} {cat['name'][:26]:<28} "
+                f"ok {cat['ok']} / fail {cat['fail']}"
+            )
+        return 0
+    if cmd == "ingest":
+        sessions = SessionStore(cfg.db_path)
+        audit = AuditLog(cfg.runs_dir)
+        telemetry = Telemetry(cfg.db_path)
+        ids = args.sessions or []
+        if args.scan:
+            ids = [row["id"] for row in sessions.list(limit=int(args.limit))]
+        if not ids:
+            print("给 --session <ID>，或 --scan 扫最近会话", file=sys.stderr)
+            return 2
+        written = 0
+        for sid in ids:
+            info = sessions.get(sid) or {}
+            if not info:
+                print(f"  {sid} 不存在", file=sys.stderr)
+                continue
+            rec = ledger.ingest(
+                sid,
+                str(info.get("task") or ""),
+                audit.read(sid),
+                telemetry.list(sid),
+                status=str(info.get("status") or ""),
+            )
+            if rec:
+                written += 1
+                cats = ", ".join(f"#{c['no']}({c['score']})" for c in rec["cats"])
+                print(f"  {sid} → {rec['level']}  {cats}")
+        print(f"写入 {written} 条证据（重复会话自动跳过）")
+        return 0
+    if cmd == "edges":
+        state = ledger.state()
+        if not state["auto_edges"]:
+            print("还没有自动边：需要同一次任务同时命中两类且不在手绘边里。")
+            return 0
+        for edge in state["auto_edges"]:
+            print(f"  #{edge['from']} → #{edge['to']}  ×{edge['count']}  {'/'.join(edge['sessions'])}")
+        return 0
+    if cmd == "export":
+        out = Path(args.out).expanduser()
+        path = ledger.export(out)
+        print(f"已导出：{path}")
+        return 0
+    return 2
+
+
 def _evolve_command(args: argparse.Namespace, cfg: Config) -> int:
     """自进化命令组：读用量、跑生命周期、蒸馏配方。只改状态位，不删技能文件。"""
     if not cfg.evolution_enabled:
@@ -1434,6 +1506,17 @@ def main(argv: list[str] | None = None) -> int:
     policy_sub.add_parser("suggest", help="按实测延迟给提速/更稳的建议（只建议不改）")
     policy_sub.add_parser("stats", help="近期调用延迟分位与失败数")
 
+    tree_parser = sub.add_parser("tree", help="技能树台账：证据回写 A/P/B/C、自动加边、导出")
+    tree_sub = tree_parser.add_subparsers(dest="tree_cmd", required=True)
+    tree_sub.add_parser("status", help="29 类当前等级与证据计数")
+    t_ingest = tree_sub.add_parser("ingest", help="把会话证据回写图谱")
+    t_ingest.add_argument("--session", dest="sessions", action="append", help="会话 ID，可给多个")
+    t_ingest.add_argument("--scan", action="store_true", help="扫最近会话批量回写")
+    t_ingest.add_argument("--limit", type=int, default=30, help="--scan 时最多扫多少条（默认 30）")
+    tree_sub.add_parser("edges", help="列出由共现自动生成的边")
+    t_export = tree_sub.add_parser("export", help="导出成图谱可吃的 EV/edges JSON")
+    t_export.add_argument("--out", default="tree-export.json", help="输出路径")
+
     usage_parser = sub.add_parser("usage", help="额度视图：累计 token 用量与总额度余额")
     usage_parser.add_argument("--quota", type=int, default=10_000_000, help="总额度 token（默认 1000 万）")
     usage_parser.add_argument("--detail", action="store_true", help="列出消耗最高的会话")
@@ -1461,6 +1544,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "policy":
         return _policy_command(args, cfg)
+
+    if args.cmd == "tree":
+        return _tree_command(args, cfg)
 
     if args.cmd == "model":
         return _model_command(args, cfg)

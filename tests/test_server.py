@@ -75,6 +75,18 @@ def test_policy_endpoints_expose_and_apply(tmp_path) -> None:
         assert any(r["key"] == "model.retries" and int(r["value"]) == 3 for r in rows)
 
 
+def test_tree_endpoints_expose_state_and_validate(tmp_path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        body = client.get("/api/tree").json()
+        assert body["levels"]["A"] + body["levels"]["P"] + body["levels"]["B"] == 29
+        assert len(body["cats"]) == 29
+        assert client.post("/api/tree/ingest", json={}).status_code == 400
+        scan = client.post("/api/tree/scan", json={"limit": 1}).json()
+        assert set(scan) == {"scanned", "written", "skipped", "failed"}
+        exported = client.get("/api/tree/export").json()
+        assert len(exported["payload"]["EV"]) == 29
+
+
 def test_run_endpoint_rejects_without_token(tmp_path) -> None:
     with TestClient(create_app(_config(tmp_path, "s3cret"))) as client:
         response = client.post("/api/run", json={"task": "查一下资料"})

@@ -95,6 +95,7 @@ doubao-agent serve [--host 127.0.0.1]  # 控制台 + SSE，默认 8765 且仅绑
 - **定时**：cron 任务的增删、启停开关、立即触发（`/api/schedules`）。
 - **指标**：span 总量、失败数、最慢 5 条、按工具与按类型分布（`/api/metrics`）。
 - **技能**：本地技能清单与风险级别（`/api/skills`）。
+- **图谱**：29 类网络安全技能树的 A/P/B/C 状态、证据计数与自动边；可一键回写最近任务、导出图谱 JSON（`/api/tree`、`/api/tree/ingest`、`/api/tree/scan`、`/api/tree/export`）。
 - **策略**：22 项 network/model 参数在线查看来源并热改，`turbo / balanced / careful` 一键切换，实测 p50/p90 与建议可套用（`/api/policy`、`/api/policy/set`、`/api/policy/preset`）。
 
 ## 可靠性与可观测

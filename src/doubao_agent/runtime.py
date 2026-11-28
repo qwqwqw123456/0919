@@ -24,6 +24,7 @@ from .core.profile import ProfileStore
 from .core.recipe import RecipeStore
 from .core.scheduler import ScheduleStore
 from .core.session import SessionStore
+from .core.skilltree import TreeLedger
 from .core.telemetry import Telemetry
 from .core.usage import UsageMeter
 from .core.working import WorkingMemory
@@ -79,6 +80,7 @@ class Runtime:
     telemetry: Telemetry
     evolution: EvolutionStore | None = None
     voice: Any = None
+    tree: TreeLedger | None = None
     # 正在运行的会话 → 该次运行专属的 Agent（取消只作用于对应会话）
     _runs: dict[str, Agent] = field(default_factory=dict, repr=False, compare=False)
 
@@ -280,6 +282,7 @@ class Runtime:
         if voice_src is not None:
             voice_src.bind_reply(runtime.voice_reply)
             runtime.voice = voice_src
+        runtime.tree = TreeLedger(Path(config.workspace) / "tree")
         return runtime
 
     async def voice_reply(self, text: str, history: list[dict[str, str]] | None = None) -> str:
@@ -394,6 +397,26 @@ class Runtime:
             return await agent.run(task, session_id, on_event=on_event, images=images)
         finally:
             self._runs.pop(session_id, None)
+            self.ingest_tree(session_id)
+
+    def ingest_tree(self, session_id: str) -> dict[str, Any] | None:
+        """把一次运行的证据回写图谱；任何异常都不能影响任务本身。"""
+        if self.tree is None or not self.tree.ready:
+            return None
+        try:
+            info = self.sessions.get(session_id) or {}
+            events = self.agent.audit.read(session_id)
+            spans = self.telemetry.list(session_id)
+            return self.tree.ingest(
+                session_id,
+                str(info.get("task") or ""),
+                events,
+                spans,
+                status=str(info.get("status") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - 记账失败不拖垮运行
+            print(f"[warn] 技能树回写失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+            return None
 
     def cancel_session(self, session_id: str) -> bool:
         """请求取消指定会话；没有正在运行的该会话时返回 False。"""

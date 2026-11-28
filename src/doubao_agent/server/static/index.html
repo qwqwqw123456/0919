@@ -222,7 +222,23 @@
   @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .searchline{display:flex;align-items:center;gap:8px}
   .searchline .field{flex:1}
-  #v-policy .two{height:calc(100% - 2px)}
+  #v-tree .two{height:calc(100% - 2px)}
+  .trrow{display:grid;grid-template-columns:26px 10px 1fr 44px 26px;gap:8px;align-items:center;
+    padding:5px 2px;border-bottom:1px solid var(--line);cursor:default}
+  .trrow:hover{background:rgba(255,255,255,.03)}
+  .trrow .no{font-family:var(--mono);font-size:10.5px;color:var(--dim);text-align:right}
+  .trrow .nm{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .trrow .trcnt{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-align:right}
+  .trrow .nm .hit{color:var(--accent-2);font-size:10.5px;margin-left:6px}
+  .trdot{width:8px;height:8px;border-radius:50%;box-shadow:0 0 8px currentColor}
+  .trlv{font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:6px;border:1px solid var(--line);justify-self:end}
+  .trtier{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:12px 0 2px}
+  .trbar{display:flex;height:7px;border-radius:6px;overflow:hidden;margin:8px 0 4px;background:rgba(255,255,255,.05)}
+  .trbar b{display:block;height:100%}
+  .trsum{display:flex;gap:14px;flex-wrap:wrap;margin-top:2px}
+  .trsum div{font-size:11px;color:var(--muted)}
+  .trsum div b{display:block;font-family:var(--mono);font-size:15px;color:var(--text)}
+  #v-tree .two{height:calc(100% - 2px)}
   .polrow{display:grid;grid-template-columns:1fr 156px 86px 44px;gap:8px;align-items:center;
     padding:6px 0;border-bottom:1px solid rgba(255,255,255,.045)}
   .polrow:last-child{border-bottom:0}
@@ -281,6 +297,7 @@
       <button data-view="cron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>定时<span class="badge" id="navCron"></span></button>
       <button data-view="metrics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>指标</button>
       <button data-view="skills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l2.5 5.5 6 .8-4.4 4.2 1 6-5.1-2.9-5.1 2.9 1-6L3.5 9.3l6-.8z"/></svg>技能<span class="badge" id="navSkills"></span></button>
+      <button data-view="tree"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.9 7.2l2.6 8.6M16.1 7.2l-2.6 8.6M8.2 6h7.6"/></svg>图谱<span class="badge" id="navTree"></span></button>
       <button data-view="policy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18h4l3-9 3 6 2-3h4"/></svg>策略</button>
     </nav>
     <div class="foot"><span id="fVer">doubao-agent</span><span id="fKinds">—</span><span id="fUsage">—</span></div>
@@ -488,6 +505,22 @@
         </div>
       </section>
 
+      <section class="view" id="v-tree">
+        <div class="two">
+          <div class="card">
+            <div class="head"><h2>29 类 · A/P/B/C</h2><span class="count" id="treeMeta"></span>
+              <div class="right"><button class="tiny" id="treeScanBtn">回写最近任务</button>
+              <button class="tiny" onclick="loadTree()">刷新</button></div></div>
+            <div class="pad scroll" id="treeCats" style="overflow-y:auto;flex:1"></div>
+          </div>
+          <div class="card">
+            <div class="head"><h2>证据与自动边</h2><span class="count" id="treeUp"></span>
+              <div class="right"><button class="tiny" id="treeExportBtn">导出 JSON</button></div></div>
+            <div class="pad scroll" id="treeSide" style="overflow-y:auto;flex:1"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="v-skills">
         <div class="card">
           <div class="head"><h2>本地技能</h2><span class="count" id="skillCount"></span>
@@ -558,7 +591,7 @@ window.go = function (name) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.view === name));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + name));
   ({overview: loadOverview, task: loadTask, tools: loadTools, kb: loadKB, cron: loadCron,
-    metrics: loadMetrics, skills: loadSkills, policy: loadPolicy}[name] || (() => {}))();
+    metrics: loadMetrics, skills: loadSkills, policy: loadPolicy, tree: loadTree}[name] || (() => {}))();
 };
 $('nav').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-view]');
@@ -902,6 +935,92 @@ async function loadSkills() {
     </div>`;
   }).join('') : emptyBox('没有安装技能', '');
 }
+
+/* tree：29 类技能树台账 */
+const LV_COLOR = {A: '#4ade80', P: '#fbbf24', B: '#596274', C: '#8a94a6'};
+const LV_NOTE = {A: '已验 · 本机可复现', P: '部分验', B: '待验 · 用前先自验', C: '边界 · 不作结论'};
+async function loadTree() {
+  let d;
+  try { d = await api('/api/tree'); }
+  catch (e) { $('treeCats').innerHTML = emptyBox('技能树台账不可用', e.message); $('treeSide').innerHTML = ''; return; }
+  const lv = d.levels || {A: 0, P: 0, B: 0, C: 0};
+  $('navTree').textContent = d.evidence_total || '';
+  $('treeMeta').textContent = `${d.version} · 证据 ${d.evidence_total}`;
+  $('treeUp').textContent = `升级 ${d.upgraded || 0} · 失败反馈 ${d.regressed || 0}`;
+  const total = (lv.A + lv.P + lv.B + lv.C) || 29;
+  const bar = ['A', 'P', 'B', 'C'].map(k =>
+    `<b style="width:${(lv[k] / total * 100).toFixed(2)}%;background:${LV_COLOR[k]}" title="${k} ${lv[k]}"></b>`).join('');
+  const tiers = (d.tiers || []).map(t => {
+    const rows = t.ids.map(no => {
+      const c = d.cats[String(no)] || d.cats[no];
+      if (!c) return '';
+      const hits = (c.hits || []).slice(0, 2).join(' · ');
+      const mark = c.upgraded ? '↑' : c.regressed ? '↓' : '';
+      return `<div class="trrow" title="${esc(c.name)}｜${esc((c.note || '').slice(0, 220))}">
+        <span class="no">${no}</span>
+        <span class="trdot" style="color:${LV_COLOR[c.level]};background:${LV_COLOR[c.level]};opacity:${c.ok + c.fail ? 1 : .35}"></span>
+        <span class="nm">${esc(c.short || c.name)}${hits ? `<span class="hit">${esc(hits)}</span>` : ''}</span>
+        <span class="trcnt">${c.ok + c.fail ? `${c.ok}/${c.fail}` : '—'}</span>
+        <span class="trlv" style="color:${LV_COLOR[c.level]};border-color:${LV_COLOR[c.level]}55">${c.level}${mark}</span>
+      </div>`;
+    }).join('');
+    return `<div class="trtier">${esc(t.t)} · ${esc(t.d)}</div>${rows}`;
+  }).join('');
+  $('treeCats').innerHTML = `<div class="trbar">${bar}</div>
+    <div class="trsum">
+      <div><b style="color:#4ade80">${lv.A}</b>已验 A</div>
+      <div><b style="color:#fbbf24">${lv.P}</b>部分验 P</div>
+      <div><b style="color:#596274">${lv.B}</b>待验 B</div>
+      <div><b style="color:#8a94a6">${lv.C}</b>边界 C</div>
+    </div>` + tiers;
+  const auto = d.auto_edges || [];
+  const manual = (d.edges || []).length;
+  const evRows = Object.values(d.cats || {}).filter(c => c.ok + c.fail > 0)
+    .sort((a, b) => (b.ok + b.fail) - (a.ok + a.fail))
+    .map(c => `<div class="rowline"><span class="mono">#${c.no} ${esc(c.short || '')}</span><span class="spacer"></span>
+      <span class="dim" style="font-size:10.5px">${c.level} · ok ${c.ok} / fail ${c.fail} · ${esc(c.last_session || '')}</span></div>`).join('');
+  $('treeSide').innerHTML = `
+    <div class="dim" style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase">等级口径</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.7;margin:4px 0 12px">
+      ${['A', 'P', 'B', 'C'].map(k => `<span style="color:${LV_COLOR[k]}">●</span> ${k} ${LV_NOTE[k]}`).join('<br>')}
+    </div>
+    <div class="dim" style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase">有证据的类别</div>
+    <div style="margin:4px 0 12px">${evRows || '<div class="dim" style="font-size:11.5px">还没有回写记录，跑完任务后自动记账。</div>'}</div>
+    <div class="dim" style="font-size:10.5px;letter-spacing:.08em;text-transform:uppercase">自动边 · 共现生成</div>
+    <div style="margin:4px 0 6px">${auto.length ? auto.map(e => `
+      <div class="rowline"><span class="mono" style="font-size:11.5px">#${e.from} → #${e.to}</span>
+        <span class="spacer"></span><span class="dim" style="font-size:10.5px">×${e.count}</span></div>`).join('')
+      : '<div class="dim" style="font-size:11.5px">暂无。一次任务同时强命中两类（且不在手绘边里）才会长出新连线。</div>'}</div>
+    <div class="dim" style="font-size:10.5px;line-height:1.7;margin-top:10px">
+      手绘边 ${manual} 条 · 自动边 ${auto.length} 条 · 合计 ${manual + auto.length} 条<br>
+      等级只升不降：失败只记反馈标记，不会把已验类别打回去。
+    </div>`;
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const scan = $('treeScanBtn');
+  if (scan) scan.addEventListener('click', async () => {
+    scan.disabled = true;
+    try {
+      const r = await post('/api/tree/scan', {limit: 30});
+      toast(`扫 ${r.scanned} 条 · 新写 ${r.written} · 跳过 ${r.skipped}`);
+      loadTree();
+    } catch (e) { toast('回写失败：' + e.message); }
+    scan.disabled = false;
+  });
+  const exp = $('treeExportBtn');
+  if (exp) exp.addEventListener('click', async () => {
+    try {
+      const d = await api('/api/tree/export');
+      const blob = new Blob([JSON.stringify(d.payload, null, 2)], {type: 'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sec-tree-export.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('已导出 ' + Object.keys(d.payload.EV || {}).length + ' 类');
+    } catch (e) { toast('导出失败：' + e.message); }
+  });
+});
 
 /* policy */
 async function loadPolicy() {

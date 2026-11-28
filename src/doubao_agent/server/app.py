@@ -359,6 +359,45 @@ def create_app(config: Config) -> FastAPI:
         except PolicyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    def _tree() -> Any:
+        tree = getattr(rt(), "tree", None)
+        if tree is None or not tree.ready:
+            raise HTTPException(status_code=404, detail="技能树台账未启用")
+        return tree
+
+    @app.get("/api/tree")
+    async def tree_state() -> dict[str, Any]:
+        return _tree().state()
+
+    @app.post("/api/tree/ingest")
+    async def tree_ingest(payload: dict[str, Any]) -> dict[str, Any]:
+        session_id = str((payload or {}).get("session", "")).strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session 不能为空")
+        rec = rt().ingest_tree(session_id)
+        return {"ingested": bool(rec), "record": rec}
+
+    @app.post("/api/tree/scan")
+    async def tree_scan(payload: dict[str, Any]) -> dict[str, Any]:
+        limit = int((payload or {}).get("limit", 20) or 20)
+        rows = rt().sessions.list()[: max(1, min(limit, 200))]
+        done, skipped, failed = 0, 0, 0
+        for row in rows:
+            try:
+                rec = rt().ingest_tree(str(row.get("id") or ""))
+            except Exception:  # noqa: BLE001 - 单条失败不能中断扫描
+                failed += 1
+                continue
+            done += 1 if rec else 0
+            skipped += 0 if rec else 1
+        return {"scanned": len(rows), "written": done, "skipped": skipped, "failed": failed}
+
+    @app.get("/api/tree/export")
+    async def tree_export() -> dict[str, Any]:
+        tree = _tree()
+        path = tree.export(tree.root / "tree-export.json")
+        return {"path": str(path), "payload": json.loads(path.read_text(encoding="utf-8"))}
+
     @app.post("/api/sessions/{session_id}/resume")
     async def resume_session(session_id: str) -> dict[str, Any]:
         runtime = rt()
