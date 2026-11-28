@@ -273,6 +273,15 @@ var P0=curPtr();
       if(r.ok){ meta=await r.json(); LOCAL_MODE=true; }
     }catch(e){}
   }
+  if(!meta){
+    /* 独立页：先问指针拿最新 meta，避免首屏吃旧缓存 */
+    try{
+      var pr=await ptrRace(4000);
+      if(pr&&pr.meta&&(pr.t||'')>=(SHADOW.t||'')){
+        meta=await jget(pr.meta+(pr.meta.indexOf('?')<0?'?':'&')+'t='+Date.now(),12000);
+      }
+    }catch(e){}
+  }
   if(!meta){ try{ meta=await jget(P0.meta,12000); }catch(e){} }
   if(!meta&&SHADOW.meta!==P0.meta){ try{ meta=await jget(SHADOW.meta,8000); }catch(e){} }
   if(!meta){bootErr('数据结构包读取失败');return;}

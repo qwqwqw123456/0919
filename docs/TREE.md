@@ -68,10 +68,16 @@
 - `doubao-agent tree lookup 提权 --limit 10` 与 `GET /api/tree/lookup?q=&limit=`：在 2667 条索引里按名称/正文子串查找，名称命中优先，返回类/子类/状态/正文摘要。
 - 工作台图谱条右侧输入框同源，输入即查（260ms 防抖，最多 8 条），结果面板显示类与子类、正文前 120 字。
 
-## 发布快照
+## 发布通道（已接通）
 
-- `PYTHONPATH=src python3 scripts/publish_tree.py --out tree-published.html`：把当前 EV/边/自动边内联成自包含 HTML，可直接传 CDN 打开（徽标显示「发布快照」）。
-- 仅上传静态快照；远端 `pointer.json` 未改，别人打开原入口看到的还是旧壳，需要你确认后再换指针。
+- 指针仓库：`qwqwqw123456/sec-tree-go` 的 `pointer.json`（页面里 `PTR` 三源：jsDelivr ×2 + gh-proxy 直读 raw，按 `t` 取最新）。
+- 发布四步：
+  1. `tree export --out tree-export.json`；
+  2. 上传 JSON 得到 `meta` 地址（CDN 直链）；
+  3. `python3 scripts/publish_cdn.py --meta <meta地址> --out tree-shell.html` 生成独立壳（`shellV=s15x`，首屏先问指针，避免吃旧缓存；下载按钮指回原始 CDN 直链）；
+  4. 上传壳得到 `url`，改 `pointer.json` 的 `url/shellV/meta/v/t`，push 到 `main`。
+- 旧入口 `aka.doubaocdn.com/s/J1fvwP4Q3v` 会因 `shellV` 变化自动 `location.replace` 到新壳，不用换链接；实测两个入口都落到同一新壳、29 节点、A 25。
+- 缓存：jsDelivr `@main` 可能滞后数小时，三源按 `t` 比新旧，gh-proxy 直读 raw 通常 1–2 分钟内生效。
 
 ## 工具维度
 
