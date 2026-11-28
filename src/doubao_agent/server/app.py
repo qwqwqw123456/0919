@@ -76,6 +76,37 @@ class EventBus:
                 pass
 
 
+FRESH_INTERVAL = 20 * 3600  # 20 小时；避免同一天重复抓
+
+
+async def _run_tree_fresh(runtime: Runtime) -> None:
+    """每天最多一次抓 CISA KEV 进 P 队列；失败只记日志，不影响服务。"""
+    from ..core.freshness import Freshness
+    from ..core.skilltree import TreeLedger
+
+    while True:
+        try:
+            root = Path(runtime.config.workspace) / "tree"
+            mark = root / "fresh-last.json"
+            due = True
+            if mark.is_file():
+                try:
+                    last = float(json.loads(mark.read_text(encoding="utf-8")).get("ts") or 0)
+                    due = time.time() - last >= FRESH_INTERVAL
+                except (OSError, ValueError, json.JSONDecodeError):
+                    due = True
+            if due and root.is_dir():
+                ledger = TreeLedger(root)
+                res = await asyncio.to_thread(Freshness(ledger).fetch, days=30, limit=40)
+                mark.write_text(json.dumps({"ts": round(time.time(), 3), "ok": res.get("ok"),
+                                            "added": res.get("added", 0), "total": res.get("total", 0),
+                                            "error": res.get("error", "")}, ensure_ascii=False),
+                                encoding="utf-8")
+        except Exception as exc:  # 后台任务不能把服务带下去
+            print(f"[tree-fresh] {type(exc).__name__}: {exc}", flush=True)
+        await asyncio.sleep(3600)
+
+
 async def _run_scheduler(runtime: Runtime, bus: EventBus) -> None:
     """Poll due cron schedules and dispatch them concurrently (bounded, non-blocking)."""
 
@@ -134,6 +165,7 @@ def create_app(config: Config) -> FastAPI:
         state["a2a"] = A2AHandler(runtime, _base_url(config))
         scheduler_task = None
         watcher_task = None
+        fresh_task = asyncio.create_task(_run_tree_fresh(runtime))
         if runtime.config.scheduler_enabled:
             scheduler_task = asyncio.create_task(_run_scheduler(runtime, bus))
         if runtime.config.watch_enabled:
@@ -147,6 +179,7 @@ def create_app(config: Config) -> FastAPI:
                 scheduler_task.cancel()
             if watcher_task is not None:
                 watcher_task.cancel()
+            fresh_task.cancel()
             await runtime.aclose()
 
     app = FastAPI(title="Doubao Agent Console", lifespan=lifespan)
@@ -408,6 +441,18 @@ def create_app(config: Config) -> FastAPI:
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["_path"] = str(path)
         return payload
+
+    @app.get("/api/tree/diff")
+    async def tree_diff() -> dict[str, Any]:
+        return _tree().diff()
+
+    @app.post("/api/tree/triage")
+    async def tree_triage(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        from .core.freshness import triage_markdown
+
+        only = str((payload or {}).get("id", "") or "")
+        path = await asyncio.to_thread(triage_markdown, _tree(), None, only=only)
+        return {"ok": True, "path": str(path), "markdown": path.read_text(encoding="utf-8")}
 
     @app.get("/api/tree/download")
     async def tree_download(which: str = "agent") -> FileResponse:

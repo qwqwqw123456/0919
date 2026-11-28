@@ -77,16 +77,67 @@ def test_tool_fail_counted_without_becoming_edge(tmp_path) -> None:
 
 def test_cooccurrence_creates_edge_outside_manual(tmp_path) -> None:
     ledger = _ledger(tmp_path)
-    ledger.ingest(
-        "s7",
-        "分析 UPX 加壳类型，给出逆向脱壳与 IDA 静态分析思路",
-        [EXEC_OK, FINISH],
-        status="completed",
-    )
+    for sid in ("s7", "s7b"):
+        ledger.ingest(
+            sid,
+            "分析 UPX 加壳类型，给出逆向脱壳与 IDA 静态分析思路",
+            [EXEC_OK, FINISH],
+            status="completed",
+        )
     state = ledger.state()
     pairs = {(e["from"], e["to"]) for e in state["auto_edges"]}
     assert (4, 5) in pairs
     assert (1, 2) not in pairs  # 手绘边不重复生成
+    edge = next(e for e in state["auto_edges"] if (e["from"], e["to"]) == (4, 5))
+    assert edge["kind"] == "cooccur" and edge["reason"] and edge["explain"]
+
+
+def test_single_session_cooccurrence_does_not_draw_edge(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.ingest("s10", "分析 UPX 加壳与逆向脱壳", [EXEC_OK], status="completed")
+    assert ledger.state()["auto_edges"] == []
+
+
+def test_command_template_normalization() -> None:
+    from doubao_agent.core.skilltree import command_template
+
+    def t(cmd: str):
+        return command_template("script.run_shell", {"arguments": "{'command': '" + cmd + "'}"})
+
+    assert t("nmap -sV 1.2.3.4") == "nmap"
+    assert t("cd /tmp && upx -d a.bin") == "upx"
+    assert t("docker run alpine") == "docker:run"
+    assert t("ls -la /tmp") is None            # 通用底座不进模板
+    assert t("curl https://x") is None
+
+
+def test_tool_edges_gated_by_threshold(tmp_path) -> None:
+    ev = {"event": "tool_call", "tool": "script.run_shell", "ok": True,
+          "arguments": "{'command': 'nmap -sV 10.0.0.1'}"}
+
+    two = _ledger(tmp_path / "two")
+    for sid in ("s11", "s12"):
+        two.ingest(sid, "内网渗透 端口扫描 nmap", [ev, FINISH], status="completed")
+    assert two.state()["tool_edges"] == []          # 未到 3 次
+
+    three = _ledger(tmp_path / "three")
+    for sid in ("s13", "s14", "s15"):
+        three.ingest(sid, "内网渗透 端口扫描 nmap", [ev, FINISH], status="completed")
+    edges = three.state()["tool_edges"]
+    assert any(e["tool"] == "nmap" and e["cat"] == 1 and e["count"] == 3 for e in edges)
+    assert {e["tool"] for e in edges} == {"nmap"}
+
+
+def test_snapshot_and_diff(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.ingest("s20", "判断 /tmp/a 是否加壳", [EXEC_OK], status="completed")
+    ledger.export(tmp_path / "tree" / "a.json")
+    ledger.ingest("s21", "判断 /tmp/b 是否加壳", [EXEC_OK], status="completed")
+    ledger.export(tmp_path / "tree" / "b.json")
+    d = ledger.diff()
+    assert d["ok"] is True
+    assert d["evidence_delta"] == 1
+    assert d["new_edges"] == [] and d["gone_edges"] == []
 
 
 def test_export_matches_page_shape(tmp_path) -> None:

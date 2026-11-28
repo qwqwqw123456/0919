@@ -108,3 +108,49 @@ class Freshness:
                 item["ts"] = round(time.time(), 3)
                 fh.write(json.dumps(item, ensure_ascii=False) + "\n")
         return {"ok": True, "added": len(items), "total": len(self.pending()), "items": items, "path": str(self.path)}
+
+
+def triage_markdown(ledger: TreeLedger, path: Path | None = None, *, only: str = "") -> Path:
+    """把 P 候选整理成复现核查单：只写版本/配置核对步骤，不写利用载荷。"""
+    fresh = Freshness(ledger)
+    rows = fresh.pending()
+    if only:
+        rows = [r for r in rows if str(r.get("id")) == only]
+    out = Path(path) if path else ledger.root / f"triage-{time.strftime('%Y%m%d')}.md"
+    lines = [
+        "# KEV 候选复现核查单",
+        "",
+        f"生成时间：{time.strftime('%Y-%m-%d %H:%M')}｜候选 {len(rows)} 条｜来源：CISA KEV（公开）",
+        "",
+        "口径：本单只做资产/版本/配置核对；任何复现必须在已授权的隔离资产与快照上进行，"
+        "不在本单提供利用载荷。跑通后按会话回写等级，P→A 只认本机证据。",
+        "",
+    ]
+    for r in rows:
+        cats = "、".join(f"#{c['no']}{c['name']}" for c in r.get("cats") or [])
+        lines += [
+            f"## {r.get('id')} {r.get('title', '')}",
+            "",
+            f"- 厂商/产品：{r.get('vendor', '')} / {r.get('product', '')}",
+            f"- 收录日期：{r.get('date', '')}｜归类：{cats or '—'}",
+            f"- 摘要：{r.get('note', '')}",
+            "",
+            "核查步骤（只读）：",
+            "1. 资产确认：从自建资产清单核对是否存在该产品与暴露面，不做外部扫描。",
+            "2. 版本核对：`<产品> --version` 或管理台版本页，与厂商公告的受影响区间比对；"
+            "拿不到版本就先标 `未确认`，不要猜。",
+            "3. 配置核对：按公告列出的前置条件（组件开关、端口、权限）逐条打勾。",
+            "4. 隔离验证：仅在已授权资产 + 快照 + 断网/内网环境复现，记录命令与输出。",
+            "5. 回写：`doubao-agent tree ingest --session <验证会话ID>`；A 只认本机跑通的证据。",
+            "",
+        ]
+    out.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    if rows:
+        by_id = {str(r.get("id")) for r in rows}
+        rewritten = []
+        for row in fresh.pending():
+            if str(row.get("id")) in by_id:
+                row["status"] = "triaged"
+            rewritten.append(json.dumps(row, ensure_ascii=False))
+        fresh.path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    return out

@@ -39,8 +39,111 @@ DEFAULT_INDEX = Path(__file__).resolve().parents[3] / "data" / "sec-tree-v55.jso
 DEFAULT_ALIAS = Path(__file__).resolve().parents[3] / "data" / "sec-tree-alias.json"
 MIN_SCORE = 3.0
 EDGE_MIN_SCORE = 5.0
+EDGE_MIN_COUNT = 2       # 同一对类别至少 2 次共现才连线，避免单次任务刷图
+EDGE_MIN_SESSIONS = 2    # 且必须跨 2 个会话
+TOOL_MIN_COUNT = 3       # 工具模板 → 类别：至少 3 次
+TOOL_MIN_SESSIONS = 2
+GENERIC_BINS = {
+    "bash", "sh", "zsh", "dash", "python", "python3", "curl", "wget", "git",
+    "pip", "pip3", "npm", "npx", "ls", "cat", "head", "tail", "grep", "egrep",
+    "awk", "sed", "chmod", "chown", "cp", "mv", "rm", "mkdir", "touch", "tar",
+    "zip", "unzip", "ssh", "scp", "rsync", "echo", "printf", "cd", "export",
+    "sudo", "env", "which", "find", "xargs", "tee", "test", "sleep", "true",
+    "sort", "stat", "wc", "free", "pwd", "uname", "whoami", "hostname", "date",
+    "timeout", "set", "unset", "if", "then", "fi", "for", "while", "do", "done",
+    "source", "dirname", "basename", "realpath", "readlink", "df", "du", "ps",
+    "kill", "pgrep", "nohup", "wait", "seq", "tr", "cut", "paste", "diff", "file",
+    "else", "then", "elif", "esac", "case", "break", "continue", "return", "local",
+    "null", "dev", "proc", "sys", "tmp", "home", "usr", "bin", "etc",
+}
+_CMD_SPLIT = re.compile(r"&&|\|\||;|\|")
 _LEX_SPLIT = re.compile(r"[^\u4e00-\u9fa5A-Za-z0-9+#./\-]+")
 _EXPLICIT = re.compile(r"#\s?([0-9]{1,2})(?![0-9])")
+
+
+def _arguments(event: dict[str, Any]) -> dict[str, Any]:
+    raw = event.get("arguments")
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        import ast
+
+        val = ast.literal_eval(raw)
+        if isinstance(val, dict):
+            return val
+    except (SyntaxError, ValueError):
+        pass
+    # 审计里存的是 repr 字符串；代码带换行时 literal_eval 会失败，退回按引号手工抽键值
+    def take_literal(text: str, pos: int) -> str | None:
+        quote = text[pos]
+        i, buf = pos + 1, []
+        while i < len(text):
+            ch = text[i]
+            if ch == "\\":
+                buf.append(text[i:i + 2])
+                i += 2
+                continue
+            if ch == quote:
+                return "".join(buf)
+            buf.append(ch)
+            i += 1
+        return None
+
+    out: dict[str, Any] = {}
+    for key in ("command", "code", "cmd", "action", "verb", "tool", "name"):
+        m = re.search("'" + key + "':\\s*", raw)
+        if not m:
+            continue
+        pos = m.end()
+        if pos >= len(raw) or raw[pos] not in "\"'":
+            continue
+        lit = take_literal(raw, pos)
+        if lit is not None:
+            out[key] = lit.replace("\\n", "\n").replace("\\t", "\t").replace("\\'", "'").replace('\\"', '"')
+    return out
+
+
+def command_template(tool: str, event: dict[str, Any]) -> str | None:
+    """把一次工具调用归一成 ``bin[:sub]`` 模板；通用底座命令不作为端点。"""
+    args = _arguments(event)
+    tool = str(tool)
+    if tool in ("script.run_shell", "host.sandbox_execute_bash"):
+        cmd = str(args.get("command") or args.get("cmd") or "").strip()
+        if not cmd:
+            return None
+        for seg in _CMD_SPLIT.split(cmd):
+            toks = [t for t in seg.strip().split() if not t.startswith("-") and "=" not in t]
+            if not toks:
+                continue
+            binary = Path(toks[0]).name
+            if (not re.match(r"^[a-z][a-z0-9_.+-]+$", binary)) or binary in GENERIC_BINS:
+                continue
+            if re.search(r"\.(txt|json|md|log|bin|py|sh|ya?ml|csv|out|data|db|gz|zip)$", binary):
+                continue
+            sub = toks[1] if len(toks) >= 3 and re.match(r"^[a-z][a-z0-9_.+-]*$", toks[1]) else ""
+            return f"{binary}:{sub}" if sub else binary
+        return None
+    if tool in ("script.run_python", "host.sandbox_execute_code"):
+        code = str(args.get("code") or "")
+        for line in code.splitlines():
+            m = re.match(r"\s*(?:import|from)\s+([a-zA-Z0-9_]+)", line)
+            if m:
+                mod = m.group(1)
+                import sys
+
+                if mod not in sys.stdlib_module_names:
+                    return f"python:{mod}"
+                return None
+        return None
+    if tool == "host.browser_gui_execute_action":
+        verb = str(args.get("action") or args.get("verb") or "act")[:20]
+        return f"browser:{verb}"
+    if tool == "toolbox.run":
+        name = str(args.get("tool") or args.get("name") or "")[:30]
+        return f"toolbox:{name}" if name else None
+    return None
 
 
 @dataclass
@@ -241,6 +344,16 @@ class TreeLedger:
         else:
             level = "P"
 
+        templates: list[str] = []
+        for e in events:
+            if e.get("event") != "tool_call" or not e.get("ok"):
+                continue
+            tool = str(e.get("tool") or "")
+            if tool not in EXEC_TOOLS:
+                continue
+            tpl = command_template(tool, e)
+            if tpl and tpl not in templates:
+                templates.append(tpl)
         record = {
             "ts": round(self._clock(), 3),
             "session": session_id,
@@ -250,6 +363,7 @@ class TreeLedger:
             "cats": cats,
             "tools_ok": sorted({t for t in tool_ok})[:12],
             "tools_fail": sorted({t for t in tool_fail})[:12],
+            "templates": templates[:8],
             "denied": len(denied),
             "spans": len(list(spans or [])),
             "note": self._note(level, exec_ok, exec_fail, denied, answer),
@@ -296,10 +410,11 @@ class TreeLedger:
         per: dict[int, dict[str, Any]] = {
             no: {"level": c.base_level, "base_level": c.base_level, "ok": 0, "fail": 0,
                  "upgraded": False, "regressed": False, "last_session": "", "note": "",
-                 "hits": [], "tools": {}, "tools_fail": {}}
+                 "hits": [], "tools": {}, "tools_fail": {}, "templates": {}}
             for no, c in self._cats.items()
         }
         pairs: dict[tuple[int, int], dict[str, Any]] = {}
+        tools: dict[tuple[str, int], dict[str, Any]] = {}
         for row in rows:
             cats = row.get("cats") or []
             level = str(row.get("level") or "B")
@@ -314,6 +429,9 @@ class TreeLedger:
                 for tool in row.get("tools_fail") or []:
                     slot.setdefault("tools_fail", {})
                     slot["tools_fail"][tool] = slot["tools_fail"].get(tool, 0) + 1
+                for tpl in row.get("templates") or []:
+                    slot.setdefault("templates", {})
+                    slot["templates"][tpl] = slot["templates"].get(tpl, 0) + 1
                 slot["last_session"] = row.get("session", "")
                 slot["note"] = row.get("note", "")
                 slot["hits"] = (c.get("hits") or [])[:5]
@@ -331,17 +449,61 @@ class TreeLedger:
                 for j in range(i + 1, len(strong)):
                     a, b = strong[i], strong[j]
                     key = (min(a, b), max(a, b))
-                    info = pairs.setdefault(key, {"from": key[0], "to": key[1], "count": 0, "sessions": []})
+                    info = pairs.setdefault(key, {"from": key[0], "to": key[1], "count": 0,
+                                                 "sessions": [], "examples": []})
                     info["count"] += 1
-                    if len(info["sessions"]) < 3:
-                        info["sessions"].append(row.get("session", ""))
+                    sid = row.get("session", "")
+                    if sid and sid not in info["sessions"] and len(info["sessions"]) < 5:
+                        info["sessions"].append(sid)
+                    if len(info["examples"]) < 2:
+                        ca = next((x for x in cats if int(x.get("no")) == a), {})
+                        cb = next((x for x in cats if int(x.get("no")) == b), {})
+                        info["examples"].append({
+                            "session": sid,
+                            "a": [str(h) for h in (ca.get("hits") or [])[:3]],
+                            "b": [str(h) for h in (cb.get("hits") or [])[:3]],
+                        })
+            if level == "A":
+                for tpl in row.get("templates") or []:
+                    for c in cats:
+                        no2 = int(c.get("no"))
+                        if float(c.get("score") or 0) < EDGE_MIN_SCORE:
+                            continue
+                        key2 = (tpl, no2)
+                        slot2 = tools.setdefault(key2, {"tool": tpl, "cat": no2, "count": 0,
+                                                        "sessions": [], "hits": []})
+                        slot2["count"] += 1
+                        sid2 = row.get("session", "")
+                        if sid2 and sid2 not in slot2["sessions"] and len(slot2["sessions"]) < 5:
+                            slot2["sessions"].append(sid2)
+                        if not slot2["hits"]:
+                            slot2["hits"] = [str(h) for h in (c.get("hits") or [])[:3]]
 
         curated = {(min(a, b), max(a, b)) for a, b in self._edges}
-        auto_edges = [
-            {"from": v["from"], "to": v["to"], "count": v["count"], "sessions": v["sessions"],
-             "reason": "同一次任务同时命中，自动加边"}
-            for k, v in sorted(pairs.items(), key=lambda kv: -kv[1]["count"])
-            if k not in curated
+        auto_edges = []
+        for k, v in sorted(pairs.items(), key=lambda kv: -kv[1]["count"]):
+            if k in curated:
+                continue
+            if v["count"] < EDGE_MIN_COUNT or len(v["sessions"]) < EDGE_MIN_SESSIONS:
+                continue
+            names = [self._cats.get(v["from"]), self._cats.get(v["to"])]
+            label = "、".join(f"#{c.no}{c.short}" for c in names if c)
+            ex = (v.get("examples") or [{}])[0]
+            tok = " / ".join(x for x in (ex.get("a") + ex.get("b")) if x) or "—"
+            auto_edges.append({
+                "from": v["from"], "to": v["to"], "count": v["count"], "sessions": v["sessions"],
+                "kind": "cooccur",
+                "hits": [ex.get("a") or [], ex.get("b") or []],
+                "reason": f"{label} 在 {v['count']} 次任务里同时命中（{len(v['sessions'])} 个会话），命中词：{tok}",
+                "explain": f"证据会话 {'/'.join(v['sessions'][:2])}",
+            })
+        tool_edges = [
+            {"tool": v["tool"], "cat": v["cat"], "count": v["count"], "sessions": v["sessions"],
+             "kind": "tool", "hits": v["hits"],
+             "reason": f"模板 {v['tool']} 在 {v['count']} 次 A 级任务中服务 #{v['cat']}",
+             "passed": True}
+            for v in tools.values()
+            if v["count"] >= TOOL_MIN_COUNT and len(v["sessions"]) >= TOOL_MIN_SESSIONS
         ]
 
         cats_out = {}
@@ -359,6 +521,7 @@ class TreeLedger:
             "cats": cats_out,
             "edges": self._edges,
             "auto_edges": auto_edges,
+            "tool_edges": sorted(tool_edges, key=lambda x: -x["count"]),
             "evidence_total": len(rows),
             "upgraded": upgraded,
             "regressed": regressed,
@@ -381,11 +544,89 @@ class TreeLedger:
             "D": dict(self._index.get("D", {}), edges=edges),
             "EV": ev,
             "auto_edges": state["auto_edges"],
+            "tool_edges": state["tool_edges"],
             "edges": edges,
         })
         out = Path(path).expanduser()
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        self.snapshot(state)
         return out
+
+    # ---------- 快照与对比 ----------
+    def _snapshots(self) -> list[Path]:
+        folder = self.root / "snapshots"
+        if not folder.is_dir():
+            return []
+        return sorted(folder.glob("*.json"), key=lambda p: (p.stat().st_mtime, p.name))
+
+    def snapshot(self, state: dict[str, Any] | None = None) -> Path | None:
+        """把当前状态落一份快照；与上一份完全相同就不写，保留最近 60 份。"""
+        state = state or self.state()
+        body = {
+            "evidence": state["evidence_total"],
+            "levels": state["levels"],
+            "regressed": state["regressed"],
+            "ev": {no: c["level"] for no, c in state["cats"].items()},
+            "auto": [[e["from"], e["to"]] for e in state["auto_edges"]],
+            "tool": [[e["tool"], e["cat"]] for e in state["tool_edges"]],
+        }
+        snaps = self._snapshots()
+        if snaps:
+            try:
+                last = json.loads(snaps[-1].read_text(encoding="utf-8"))
+                if last.get("body") == body:
+                    return None
+            except (OSError, json.JSONDecodeError):
+                pass
+        folder = self.root / "snapshots"
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = folder / f"{stamp}.json"
+        n = 1
+        while path.exists():
+            path = folder / f"{stamp}-{n}.json"
+            n += 1
+        path.write_text(json.dumps({"ts": round(self._clock(), 3), "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "body": body}, ensure_ascii=False, indent=1), encoding="utf-8")
+        for old in self._snapshots()[:-60]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        return path
+
+    def diff(self) -> dict[str, Any]:
+        """最近两份快照的差异：新边、消失边、等级变化、证据增量。"""
+        snaps = self._snapshots()
+        if len(snaps) < 2:
+            return {"ok": False, "reason": "至少需要两份快照（先 export 或回写一次）"}
+        try:
+            a = json.loads(snaps[-2].read_text(encoding="utf-8"))
+            b = json.loads(snaps[-1].read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"ok": False, "reason": f"快照不可读：{exc}"}
+        ba, bb = a.get("body") or {}, b.get("body") or {}
+        pa = {f"{x[0]}->{x[1]}" for x in ba.get("auto") or []}
+        pb = {f"{x[0]}->{x[1]}" for x in bb.get("auto") or []}
+        na = {f"{x[0]}->{x[1]}" for x in ba.get("tool") or []}
+        nb = {f"{x[0]}->{x[1]}" for x in bb.get("tool") or []}
+        changes = []
+        for no, lv in (bb.get("ev") or {}).items():
+            old = (ba.get("ev") or {}).get(no)
+            if old and old != lv:
+                changes.append({"no": int(no), "from": old, "to": lv})
+        return {
+            "ok": True,
+            "from": {"at": a.get("at"), "evidence": ba.get("evidence")},
+            "to": {"at": b.get("at"), "evidence": bb.get("evidence")},
+            "evidence_delta": (bb.get("evidence") or 0) - (ba.get("evidence") or 0),
+            "new_edges": sorted(pb - pa),
+            "gone_edges": sorted(pa - pb),
+            "new_tool_edges": sorted(nb - na),
+            "gone_tool_edges": sorted(na - nb),
+            "level_changes": changes,
+            "snapshots": len(snaps),
+        }
 
 
 def ledger_from_config(workspace: str | Path) -> TreeLedger:

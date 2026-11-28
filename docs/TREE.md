@@ -41,6 +41,33 @@
 - 噪声门槛：分类分 ≥5 才入队；纯数字词条（年份）不进词法，英文别名按词边界匹配，避免 `proper` 命中 `rop`、`cve-2026-...` 命中 `2026`。
 - 实测：45 天窗口、limit 20 → 入队 5 条（MiCollab 命令注入 / MONAI 路径穿越 / Barracuda 命令注入 / Apple 认证缺陷 / Collabora 命令注入）；同日 `XML Injection` 类弱匹配被门槛挡掉。
 
+## 边的门槛与可解释
+
+- 共现边：同一对类别 ≥2 次、且跨 ≥2 个会话才画线（单次任务不连线，避免刷图）。每条边带 `kind="cooccur"`、`reason`（命中词）、`explain`（证据会话），页面 `path` 上有 `<title>` 提示。
+- 工具边：模板 → 类别需 ≥3 次且跨 ≥2 会话，`kind="tool"`，只在 A 级任务里计；`tree tools` 可查，页面暂不画端点。
+
+## 快照与对比
+
+- 每次 `export`/回写会自动落 `tree/snapshots/<时间>.json`（内容不变则不写，保留最近 60 份）。
+- `doubao-agent tree diff` 输出：证据增量、新边/消失边、新工具边、等级变化；`GET /api/tree/diff` 同源，工作台图谱条显示「对比上份快照」。
+- 回归告警：`tree status` 打「⚠ 回归」行，`/api/tree` 的 `regressed` 计数在工作台显示橙标。
+
+## 新鲜度转 A 的入口
+
+- `doubao-agent tree triage [--id CVE-x]` 生成 `tree/triage-YYYYMMDD.md`：资产确认 → 版本核对 → 配置核对 → 隔离验证 → 回写，全部只读步骤，不含利用载荷；候选状态改 `triaged`。
+- `POST /api/tree/triage` 返回 markdown 全文。
+
+## 每日抓取
+
+- 服务内定时：`serve` 启动后每 20 小时判断一次，到期抓 KEV（`tree/fresh-last.json` 记账），失败只打日志。
+- 系统兜底：`scripts/tree-fresh-daily.sh`，crontab 每 04:17 跑一次，日志 `tree/fresh-cron.log`。系统盘重启会丢 crontab，重装命令：
+  `(crontab -l; echo "17 4 * * * /home/user/Doubao/chats/1413030229010434/doubao-agent/scripts/tree-fresh-daily.sh") | crontab -`
+
+## 发布快照
+
+- `PYTHONPATH=src python3 scripts/publish_tree.py --out tree-published.html`：把当前 EV/边/自动边内联成自包含 HTML，可直接传 CDN 打开（徽标显示「发布快照」）。
+- 仅上传静态快照；远端 `pointer.json` 未改，别人打开原入口看到的还是旧壳，需要你确认后再换指针。
+
 ## 工具维度
 
 - 证据里的成功/失败工具分别聚合进 `state.cats[no].tools` 与 `tools_fail`（tool → 次数），只做软关联，不生成依赖边；工具挂节点前必须先按 `docs/TOOL-ATTRIBUTION.md` 的命令模板归属规范归一。

@@ -253,6 +253,9 @@ def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
             f"29 类｜证据 {state['evidence_total']} 条｜A {lv['A']} · P {lv['P']} · "
             f"B {lv['B']} · C {lv['C']}｜升级 {state['upgraded']}｜自动边 {len(state['auto_edges'])}"
         )
+        reg = [f"#{no}" for no, c in state["cats"].items() if c.get("regressed")]
+        if reg:
+            print(f"  ⚠ 回归（有失败但等级未降）：{'、'.join(sorted(reg, key=lambda x: int(x[1:])))}")
         for no in sorted(state["cats"], key=lambda x: int(x)):
             cat = state["cats"][no]
             mark = "↑" if cat["upgraded"] else ("!" if cat["regressed"] else " ")
@@ -265,6 +268,9 @@ def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
         sessions = SessionStore(cfg.db_path)
         audit = AuditLog(cfg.runs_dir)
         telemetry = Telemetry(cfg.db_path)
+        if args.rebuild:
+            ledger.evidence_path.write_text("", encoding="utf-8")
+            ledger._seen_cache = set()
         ids = args.sessions or []
         if args.scan:
             ids = [row["id"] for row in sessions.list(limit=int(args.limit))]
@@ -297,6 +303,35 @@ def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
             return 0
         for edge in state["auto_edges"]:
             print(f"  #{edge['from']} → #{edge['to']}  ×{edge['count']}  {'/'.join(edge['sessions'])}")
+        return 0
+    if cmd == "diff":
+        d = ledger.diff()
+        if not d.get("ok"):
+            print(f"暂无可对比快照：{d.get('reason')}", file=sys.stderr)
+            return 1
+        print(f"{d['from']['at']} → {d['to']['at']}｜证据 +{d['evidence_delta']}")
+        print(f"  新边 {len(d['new_edges'])}｜消失边 {len(d['gone_edges'])}｜新工具边 {len(d['new_tool_edges'])}")
+        for e in d["new_edges"]:
+            print(f"    + {e}")
+        for e in d["gone_edges"]:
+            print(f"    - {e}")
+        for c in d["level_changes"]:
+            print(f"    #{c['no']} {c['from']} → {c['to']}")
+        return 0
+    if cmd == "tools":
+        state = ledger.state()
+        edges = state["tool_edges"]
+        print(f"工具边（达标）{len(edges)} 条；模板只在 A 级任务里计")
+        for e in edges:
+            print(f"  {e['tool']} → #{e['cat']}  ×{e['count']}  {'/'.join(e['sessions'][:2])}")
+        if not edges:
+            print("  还没有达标的模板→类别组合（需 ≥3 次且跨 ≥2 会话）")
+        return 0
+    if cmd == "triage":
+        from .core.freshness import triage_markdown
+
+        path = triage_markdown(ledger, Path(args.out) if args.out else None, only=args.cve)
+        print(f"核查单已写：{path}")
         return 0
     if cmd == "fresh":
         from .core.freshness import Freshness
@@ -1531,7 +1566,13 @@ def main(argv: list[str] | None = None) -> int:
     t_ingest.add_argument("--session", dest="sessions", action="append", help="会话 ID，可给多个")
     t_ingest.add_argument("--scan", action="store_true", help="扫最近会话批量回写")
     t_ingest.add_argument("--limit", type=int, default=30, help="--scan 时最多扫多少条（默认 30）")
+    t_ingest.add_argument("--rebuild", action="store_true", help="清空证据后全量重算（模板/分类都按当前口径）")
     tree_sub.add_parser("edges", help="列出由共现自动生成的边")
+    tree_sub.add_parser("diff", help="对比最近两份快照：新边/等级变化/证据增量")
+    tree_sub.add_parser("tools", help="工具模板台账：模板→类别命中与达标工具边")
+    t_triage = tree_sub.add_parser("triage", help="给 P 候选生成复现核查单（只读检查，不含利用载荷）")
+    t_triage.add_argument("--id", dest="cve", default="", help="只处理某一条 CVE")
+    t_triage.add_argument("--out", default="", help="输出 Markdown 路径")
     t_fresh = tree_sub.add_parser("fresh", help="抓公开漏洞源进 P 候选队列（不自动升 A）")
     t_fresh.add_argument("--days", type=int, default=30, help="只看最近 N 天（0=不限）")
     t_fresh.add_argument("--limit", type=int, default=50, help="本次最多入队多少条")

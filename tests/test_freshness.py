@@ -75,3 +75,15 @@ def test_ingest_dedupes_by_cve(tmp_path) -> None:
     assert r1["added"] >= 2
     assert r2["added"] == 0
     assert len(fresh.pending()) == r1["total"]
+
+
+def test_triage_markdown_marks_candidates(tmp_path) -> None:
+    from doubao_agent.core.freshness import Freshness, triage_markdown
+
+    ledger = _ledger(tmp_path)
+    fresh = Freshness(ledger)
+    fresh.ingest(PAYLOAD, days=0, limit=10)
+    out = triage_markdown(ledger, tmp_path / "triage.md")
+    text = out.read_text(encoding="utf-8")
+    assert "CVE-2026-0001" in text and "核查步骤（只读）" in text
+    assert all(r["status"] == "triaged" for r in fresh.pending())

@@ -225,6 +225,9 @@
   #v-tree .two{height:calc(100% - 2px)}
   #v-tree{display:flex;flex-direction:column;gap:8px}
   .treebar{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+  .treealert{display:none;font-size:10.5px;color:#f5b97a;border:1px solid rgba(245,185,122,.35);
+    background:rgba(245,185,122,.1);padding:2px 7px;border-radius:6px}
+  .treediff{font-size:10.5px;color:#7ee7c7}
   .treeframe{flex:1;width:100%;border:1px solid var(--line);border-radius:12px;background:#0b0f17}
   .trrow{display:grid;grid-template-columns:26px 10px 1fr 44px 26px;gap:8px;align-items:center;
     padding:5px 2px;border-bottom:1px solid var(--line);cursor:default}
@@ -278,6 +281,10 @@
     .views{overflow:visible}
     .view{height:auto;overflow:visible;padding:12px}
     .treeframe{flex:0 0 auto;height:calc(100vh - 190px);min-height:560px}
+    .treebar{flex-wrap:wrap;row-gap:6px}
+    .treebar .spacer{display:none}
+    .treebar button{flex:0 0 auto;white-space:nowrap}
+    #treeMeta{flex:1 1 100%}
     .two,.two-3{grid-template-columns:1fr;height:auto}
     #v-kb .two,#v-metrics .two{height:auto}
     .two-3{display:flex;flex-direction:column}
@@ -524,6 +531,8 @@
       <section class="view" id="v-tree">
         <div class="treebar">
           <span class="dim" style="font-size:11px" id="treeMeta">29 类 · 证据 —</span>
+          <span class="treealert" id="treeAlert"></span>
+          <span class="treediff" id="treeDiff"></span>
           <span class="spacer"></span>
           <button class="tiny" id="treeScanBtn">回写最近任务</button>
           <button class="tiny" id="treeFreshBtn">抓 CVE → P</button>
@@ -954,11 +963,32 @@ async function loadTreeFrame() {
   try {
     const d = await api('/api/tree');
     $('navTree').textContent = d.evidence_total || '';
-    $('treeMeta').textContent = `${d.version} · 证据 ${d.evidence_total} · 自动边 ${(d.auto_edges || []).length}`;
+    $('treeMeta').textContent = `${d.version} · 证据 ${d.evidence_total} · 自动边 ${(d.auto_edges || []).length} · 工具边 ${(d.tool_edges || []).length}`;
+    const alert = $('treeAlert');
+    if (alert) {
+      alert.style.display = d.regressed ? 'inline-block' : 'none';
+      alert.textContent = d.regressed ? `⚠ 回归 ${d.regressed} 类` : '';
+    }
   } catch (e) {
     $('treeMeta').textContent = '台账不可用：' + e.message;
   }
+  try {
+    const df = await api('/api/tree/diff');
+    const box = $('treeDiff');
+    if (box) box.textContent = df.ok
+      ? `对比上份快照：新边 +${df.new_edges.length} · 证据 +${df.evidence_delta} · 等级变动 ${df.level_changes.length}`
+      : '';
+  } catch (e) {}
 }
+/* iframe 报真实高度：消掉底部空白，手机端按内容长度滚动 */
+window.addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (!d.treeHeight) return;
+  const f = $('treeFrame');
+  if (!f) return;
+  f.style.flex = '0 0 auto';
+  f.style.height = Math.max(560, Math.min(2600, Number(d.treeHeight) || 560)) + 'px';
+});
 function treeReload() {
   const f = $('treeFrame');
   if (f) f.src = '/static/tree.html?embed=1&v=' + Date.now();
