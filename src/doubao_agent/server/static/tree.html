@@ -218,6 +218,7 @@ svg path.flowline{stroke:#5eead4;stroke-opacity:.95;stroke-width:3;fill:none;str
 .fstep i{font-style:normal;margin-right:5px}
 .fstep i.ok{color:#3ddc97}
 .fstep i.no{color:#ff5d6c}
+.fstep i.blk{color:#f5c451}
 .fstep em{color:#ff9aa2;font-style:normal}
 .fstep .at{margin-left:6px;color:#ff5d6c;font-size:10.5px}
 .hostline{font-size:11px;color:#7d90a8;margin:6px 0 0}
@@ -621,8 +622,8 @@ function failHTML(id){
   if(!tr)return '';
   var steps=(tr.steps||[]).slice(0,10);
   var body=steps.length?steps.map(function(st,i){
-    var no=!st.ok;
-    return '<div class="fstep"><i class="'+(no?'no':'ok')+'">'+(no?'✕':'✓')+'</i>'
+    var dn=!!st.denied, no=!st.ok&&!dn;
+    return '<div class="fstep"><i class="'+(dn?'blk':(no?'no':'ok'))+'">'+(dn?'⊘':(no?'✕':'✓'))+'</i>'
       +esc(st.t||'')+(st.tpl?' · '+esc(st.tpl):'')+' · '+(st.ms||0)+'ms'
       +(st.err?' <em>'+esc(String(st.err).slice(0,80))+'</em>':'')
       +(i===tr.first_fail?'<span class="at">← 卡在这</span>':'')+'</div>';
