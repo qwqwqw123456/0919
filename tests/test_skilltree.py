@@ -32,6 +32,7 @@ def test_ingest_exec_success_upgrades_b_category(tmp_path) -> None:
     assert rec["cats"][0]["no"] == 28
     state = ledger.state()
     assert state["cats"]["28"]["upgraded"] is True
+    assert state["cats"]["28"]["tools"]["host.sandbox_execute_bash"] == 1
     assert state["levels"]["A"] == 24  # 基线 23 + 第 28 类升级
 
 

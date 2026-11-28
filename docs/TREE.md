@@ -31,7 +31,19 @@
 
 - CLI：`doubao-agent tree status | ingest --session ID [--scan --limit N] | edges | export --out FILE`
 - HTTP：`GET /api/tree`、`POST /api/tree/ingest`、`POST /api/tree/scan`、`GET /api/tree/export`
-- 控制台「图谱」视图：29 类按 T0–T4 分层展示等级与 ok/fail，右侧列有证据类别、自动边、导出。
+- 控制台「图谱」视图：原图谱页整页嵌入（`static/tree.html?embed=1`），数据优先取本地 `/api/tree/export`，失败才回退远端 pointer；自动边在页面上画成青色虚线。
+
+## 新鲜度（P 候选队列）
+
+- `doubao-agent tree fresh --days 30 --limit 50 [--file 离线.json]`
+- `POST /api/tree/fresh`，工作台「抓 CVE → P」按钮同源。
+- 源：CISA KEV 公开 JSON（无需 key）。只入 P 队列，`fresh.jsonl` 按 CVE 去重；转 A 必须本机沙箱复现，不做自动升 A。
+- 噪声门槛：分类分 ≥5 才入队；纯数字词条（年份）不进词法，英文别名按词边界匹配，避免 `proper` 命中 `rop`、`cve-2026-...` 命中 `2026`。
+- 实测：45 天窗口、limit 20 → 入队 5 条（MiCollab 命令注入 / MONAI 路径穿越 / Barracuda 命令注入 / Apple 认证缺陷 / Collabora 命令注入）；同日 `XML Injection` 类弱匹配被门槛挡掉。
+
+## 工具维度
+
+- 证据里的成功工具按类别聚合进 `state.cats[no].tools`（tool → 次数），只做软关联，不生成依赖边。
 
 ## 导出格式
 

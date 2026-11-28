@@ -1,0 +1,783 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,">
+<title>网络安全技能树 · 29 类依赖图谱</title>
+<style>
+:root{--bg:#0b0f17;--bg2:#121826;--card:#161e2e;--line:#243044;--tx:#e6edf7;--mut:#8b9bb4;--green:#37d67a;--yellow:#f7b733;--red:#ff5d6c;--cyan:#4dd0e1}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.5;overflow-x:hidden}
+header{max-width:1500px;margin:0 auto;padding:26px 28px 14px}
+h1{font-size:24px;font-weight:700;letter-spacing:.5px}
+h1 span{color:var(--cyan)}
+.sub{color:var(--mut);font-size:13px;margin-top:5px}
+button{background:var(--card);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 13px;font-size:12px;cursor:pointer;transition:.15s}
+button:hover{border-color:var(--cyan);color:var(--cyan)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin:12px 28px 0;max-width:1500px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.tree-wrap{overflow-x:auto;margin:16px 28px 0;padding-bottom:10px}
+.tree{position:relative;margin:0 auto}
+.tier-head{position:absolute;top:0;font-size:12px;font-weight:700;text-align:center;padding:0 6px}
+.tier-head small{display:block;color:var(--mut);font-weight:400;font-size:10px;margin-top:2px}
+svg{position:absolute;top:0;left:0;pointer-events:none}
+.node{position:absolute;width:210px;height:62px;background:var(--card);border:1.5px solid var(--line);border-radius:10px;padding:9px 10px;cursor:pointer;transition:.18s;overflow:hidden;z-index:2}
+.node:hover{transform:translateY(-2px);box-shadow:0 6px 18px #0008}
+.node.sel{border-color:var(--cyan)!important;box-shadow:0 0 0 2px #4dd0e155}
+.node.dim{opacity:.32}
+.node .no{position:absolute;top:7px;right:9px;font-size:10px;color:var(--mut)}
+.node .nm{font-size:13px;font-weight:600;padding-right:26px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .meta{font-size:10px;color:var(--mut);margin-top:4px}
+.node::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tc)}
+#detail{max-width:1500px;margin:18px 28px 40px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:0;min-height:60px;overflow:hidden}
+#detail .dh{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+#detail .dh h2{font-size:17px}
+#detail .dh .badge{font-size:11px;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:3px 10px}
+#detail .db{padding:18px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.sub-item{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:11px 13px;cursor:pointer;position:relative}
+.sub-item .sk span{padding-right:4px;flex:1 1 auto;min-width:0}
+.sub-item::after{content:"▸";position:absolute;right:11px;top:9px;font-size:12px;color:var(--mut);transition:.15s}
+.sub-item.open::after{content:"▾"}
+.sub-item .sdet{display:none;margin:8px 0 2px;padding:9px 11px;border-left:2px solid var(--tc, #2a3a52);background:#0d1626;border-radius:6px;font-size:12px;line-height:1.65;color:var(--mut)}
+.sub-item.open .sdet{display:block}
+.sub-item .sdet b{color:#cfe0f5;font-weight:600}
+.wl{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.wt{font-size:11px;line-height:1.5;padding:2px 7px;border-radius:5px;background:#14203a;color:#b9cde8;border:1px solid #24344f}
+.wmore{font-size:11px;padding:3px 9px;border-radius:5px;border:1px dashed #33507a;background:transparent;color:#8ecbff;cursor:pointer}
+.sub-item .sdet code{font-size:11px}
+.sub-item .sk{font-size:12px;display:flex;justify-content:space-between;gap:8px}
+.sub-item .sk b{color:var(--cyan);flex:0 0 auto;padding-right:14px}.sub-item .stip{font-size:11px;color:#7f93ad;margin-top:3px}
+.p25{margin-top:9px;padding:10px 12px;border:1px solid #2a4a6a;border-left:3px solid #3ddc97;background:#0b1622;border-radius:7px;font-size:12px;line-height:1.7;color:#a9c0da}
+.p25 b{display:block;color:#3ddc97;margin-bottom:5px}
+.p25 i{color:#8ecbff;font-style:normal}
+.sub-item.open .stip{display:none}
+.sub-item .sbar{height:5px;background:#0a0e16;border-radius:4px;margin-top:8px;overflow:hidden}
+.sub-item .sfill{height:100%;background:var(--tc);border-radius:4px}
+.empty{padding:22px;color:var(--mut);font-size:13px;text-align:center}
+.hint{color:var(--mut);font-size:11px;margin-left:6px}
+
+.tools{max-width:1500px;margin:6px 28px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.sbox{position:relative;flex:1 1 260px;min-width:220px}
+.sbox input{width:100%;background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--tx);padding:8px 32px 8px 11px;font-size:12px;outline:none}
+.sbox input:focus{border-color:var(--cyan)}
+.sbox .clr{position:absolute;right:6px;top:6px;background:none;border:0;color:var(--mut);font-size:14px;cursor:pointer;padding:2px 6px}
+.qres{position:absolute;left:0;right:0;top:36px;background:var(--bg2);border:1px solid var(--line);border-radius:9px;max-height:280px;overflow:auto;z-index:9;display:none}
+.qres div{padding:7px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid #1b2434;display:flex;justify-content:space-between;gap:8px}
+.qres div:hover{background:#1b2434}
+.qres div b{color:var(--cyan);font-weight:600}
+.qres div small{color:var(--mut);white-space:nowrap}
+.qres .none{cursor:default;color:var(--mut)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:11px;padding:5px 9px;border-radius:20px;border:1px solid var(--line);background:var(--card);color:var(--mut);cursor:pointer}
+.chip.on{color:var(--tx);border-color:var(--cyan);background:#132033}
+.stat{font-size:12px;color:var(--mut)}
+.stat b{color:var(--green)}
+.pgbtns{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+.pgbtn{font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--mut);cursor:pointer}
+.pgbtn.on[data-pg="doing"]{color:#f7b733;border-color:#f7b733}
+.pgbtn.on[data-pg="learned"]{color:var(--green);border-color:var(--green)}
+.node::after{content:"";position:absolute;right:9px;bottom:8px;width:6px;height:6px;border-radius:50%;background:#2a3a52}
+.node[data-pg="doing"]::after{background:var(--yellow)}
+.node[data-pg="learned"]::after{background:var(--green)}
+.node .ev{position:absolute;top:6px;right:34px;width:15px;height:15px;line-height:15px;text-align:center;font-size:10px;font-weight:700;border-radius:4px}
+.node .evA{color:#0b1220;background:#3ddc97}
+.node .evB{color:#8fa3bf;background:#1b2536;border:1px solid #2b3a52}
+.node .evC{color:#ffb366;background:#1b2536;border:1px solid #ffb36655}
+.evrow{margin:12px 0 0;grid-column:1/-1;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.7;border:1px solid var(--line);background:#0e1626;color:#a9b8cc}
+.node .evP{color:#8ecbff;background:#16243a;border:1px solid #8ecbff55}
+.evrow.P{border-color:#8ecbff55;color:#cfe4fb}
+.evrow.A{border-color:#3ddc9755;color:#c8e8d8}
+.evrow.C{border-color:#ffb36655;color:#f0d0b0}
+.evrow code{display:block;margin-top:4px;font-family:ui-monospace,monospace;font-size:11px;color:#7fd4ff;background:#0a1220;padding:4px 6px;border-radius:5px;overflow-x:auto;white-space:nowrap}
+.node.faded{opacity:.18}
+.legend-note{font-size:11px;color:var(--mut);margin:8px 28px 0}
+.scroll-tip{display:none;margin:6px 16px 0;color:var(--mut);font-size:11px}
+@media(max-width:720px){
+  header{padding:18px 16px 10px}
+  h1{font-size:19px}
+  .legend{margin:10px 16px 0;gap:10px}
+  .tree-wrap{margin:10px 16px 0}
+  #detail{margin:12px 16px 28px}
+  #detail .dh{flex-wrap:wrap;padding:13px 15px;gap:8px}
+  #detail .dh h2{font-size:15px;flex:1 0 100%}
+  #detail .dh .badge{flex:0 0 auto}
+  #detail .db{padding:14px 15px;grid-template-columns:1fr}
+  #detail .empty{padding:16px;font-size:12px}
+  .scroll-tip{display:block}
+}
+
+#iview{position:fixed;inset:0;background:rgba(4,8,15,.9);z-index:60;display:none;overflow:auto;padding:16px}
+#iview.on{display:block}
+body.lock{overflow:hidden}
+.ivc{max-width:600px;margin:8vh auto 0;background:#0f1828;border:1px solid #26374f;border-radius:14px;padding:16px 16px 14px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.ihead{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#7d90ab;letter-spacing:.4px}
+.iclose{cursor:pointer;font-size:16px;color:#8fa3bf;padding:2px 6px;border-radius:6px}
+.iclose:hover{background:#1b2434;color:#fff}
+.ititle{margin:10px 0 12px;font-size:19px;line-height:1.5;color:#e9f2ff;font-weight:600}
+.imeta{font-size:12.5px;color:#9db2cc;line-height:1.9;border-left:2px solid #2a3a52;padding-left:10px}
+.imeta b{color:#8ecbff}
+.iev{margin:12px 0 14px;font-size:12px;line-height:1.7;padding:9px 11px;border-radius:8px;background:#0d1626;color:#9db2cc}
+.iev b{color:#3ddc97}
+.evlink{display:inline-block;margin-left:6px;color:#58a6ff;text-decoration:none;border-bottom:1px dotted #58a6ff}
+.evlink:hover{color:#8ecbff}
+.iev.P b{color:#8ecbff}.iev.C b{color:#ffb366}
+.iev code{display:block;margin-top:5px;font-size:11px;color:#79a9d8;word-break:break-all}
+.inav{display:flex;gap:8px;flex-wrap:wrap}
+.ibtn{flex:1 1 auto;min-width:104px;font-size:12px;padding:9px 10px;border-radius:8px;border:1px solid #2b3d57;background:#141f31;color:#cfe0f5;cursor:pointer}
+.ibtn:hover{background:#1b2a40}
+.ibtn:disabled{opacity:.35;cursor:not-allowed}
+.ibtn.cy{border-color:#2f5c86;color:#8ecbff}
+.itip{margin-top:11px;font-size:11px;color:#6f83a0;line-height:1.7}
+.atop{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px;font-size:11px}
+.atop a{color:#8ecbff;text-decoration:none;border:1px solid #2b3d57;padding:4px 9px;border-radius:6px;background:#101a29}
+.wt{cursor:pointer}
+.dlbtn{font-size:12px;padding:5px 10px;border-radius:7px;border:1px solid #2b3d57;background:#101a29;color:#8ecbff;text-decoration:none;white-space:nowrap}
+.dlbtn:hover{background:#182640}
+.kb{font-style:normal;font-size:10.5px;padding:1px 6px;border-radius:4px;border:1px solid;margin-left:6px}
+.kb-E{color:#3ddc97;border-color:#2b6a4f;background:#0d2419}
+.kb-K{color:#8ecbff;border-color:#2b4b6a;background:#0d1c2b}
+.kb-N{color:#ffb366;border-color:#6a4a2b;background:#241a0d}
+.kline{margin:10px 0 8px;font-size:11.5px;color:#8b9bb4;display:flex;align-items:center;gap:6px}
+.note{margin:12px 0 0;padding:10px 12px;border:1px solid #22334a;border-radius:9px;background:#0a1522}
+.nh{font-size:11px;color:#7f93ad;letter-spacing:.4px;margin-bottom:4px}
+.note p{margin:0;font-size:13px;line-height:1.75;color:#dbe7f5;white-space:pre-wrap}
+.note p.nt{margin-top:7px;color:#9db2cc;font-size:12.5px;border-top:1px dashed #22334a;padding-top:7px}
+.note p.nt b{color:#8ecbff;margin-right:5px}
+.note.none{color:#6f83a0;font-size:12px;text-align:center}
+.note p.nt.x b{color:#c9a6ff}
+.note p.nt.t b{color:#7fd6a8}
+.note p.nt.d b{color:#ffc27a}
+.note p.nt.g b{color:#ff9fb0}
+.note a.xlink{color:#8ecbff;text-decoration:underline dotted;cursor:pointer}
+.note a.xlink:hover{color:#d7ecff}
+.tri{margin-top:9px;padding-top:8px;border-top:1px dashed #22334a}
+.tri p{margin:4px 0 0;font-size:12.5px;line-height:1.7;color:#9db2cc}
+.tri p b{color:#8ecbff;margin-right:5px}
+.tri p b.x2{color:#c9a6ff}
+.tri p b.t2{color:#7fd6a8}
+.tri p b.d2{color:#ffc27a}
+mark{background:#26405c;color:#fff;border-radius:3px;padding:0 2px}
+.qres mark{background:#2c4a68}
+.qres div small em{color:#8ecbff;font-style:normal}
+
+.stb{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:700;vertical-align:middle}
+.st-frontier{background:#0e3b31;color:#38d9a9;border:1px solid #1f6f5c}
+.st-active{background:#1a2334;color:#a9bcd6;border:1px solid #243044}
+.st-core{background:#10243c;color:#4dabf7;border:1px solid #1e4c78}
+.st-legacy{background:#22252c;color:#7c8794;border:1px solid #313640}
+.wt.st-f{box-shadow:inset 2px 0 0 #38d9a9}
+.wt.st-l{box-shadow:inset 2px 0 0 #5a6270;color:#9aa6b8}
+.wt.st-c{box-shadow:inset 2px 0 0 #4dabf7}
+.strow{margin:6px 0 2px;font-size:12px;color:#8b9bb4}
+.strow b{color:#e6edf7}
+.ver{font-size:12px;color:#7d90a8;margin:6px 0 0;letter-spacing:.02em}
+.ver i{font-style:normal;color:#4dabf7}
+.rv{display:inline-flex;gap:6px;margin:8px 0 0;padding:2px 8px;border:1px solid #24384f;border-radius:6px;font-size:12px;color:#8ecbff;background:#101c2c}
+.pgset{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0 4px}
+.pgset>b{font-size:12px;color:#8b9bb4;font-weight:400}
+.pgbar{height:6px;background:#16202e;border-radius:3px;overflow:hidden;margin:8px 0 2px}
+.pgbar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2f7fd4,#3ddc97);transition:width .25s}
+.pgmeta{font-size:11px;color:#7d90a8;margin-top:2px}
+.spg{font-size:11px;color:#3ddc97;font-weight:400;margin-left:6px}
+.kbox{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 6px}
+.kc{cursor:pointer;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);transition:.15s}
+.kc b{display:block;font-size:22px;line-height:1.15}
+.kc span{font-size:12px;color:#c7d3e2}
+.kc i{display:block;font-size:11px;color:#7d90a8;font-style:normal;margin-top:3px}
+.kc.e b{color:#3ddc97}.kc.k b{color:#8ecbff}.kc.n b{color:#8fa3bf}
+.kc:hover{border-color:#3a5372}
+.knrow{display:flex;gap:8px;align-items:baseline;padding:9px 10px;border-bottom:1px solid #1c2a3b;cursor:pointer;font-size:13px;flex-wrap:wrap}
+.knrow b{color:#dbe6f3}.knrow span{color:#9fb2c8}.knrow i{margin-left:auto;color:#7d90a8;font-style:normal;font-size:12px}
+.knrow em{color:#8ecbff;font-style:normal;font-size:11px}
+.knrow:hover{background:#132033}
+.wt.pgu1{color:#f7b733!important}
+.wt.pgu2{color:#3ddc97!important}
+.embed header,.embed .legend,.embed .legend-note,.embed .dlbtn{display:none}
+.embed .tools{margin:4px 0 6px;gap:6px}
+.embed body{background:transparent}
+</style></head><body>
+<header>
+<h1>🌳 网络安全<span>技能树</span> · 29 类依赖图谱（原文重组 2370 + 扩编 159 + 前沿 118 + 本批 20 = 2667 词条 · 93 子类）</h1>
+<div class="sub">这是豆包自己的网安能力台账：每一行标的是我能不能做，不是资料索引。能从本机跑出结果的算「会」，只能讲清机制的算「懂」，只有名字的算「不会」。连线是前置依赖，点节点看该类的子类与词条。</div>
+<div class="ver" id="ver"></div>
+</header>
+<div class="legend" id="legend"></div>
+<div class="scroll-tip">↔ 左右滑动查看全部 5 层</div>
+<div class="tools">
+  <div class="sbox"><input id="q" placeholder="搜类名 / 子类 / 词条，例如 域渗透、Redis、#10" autocomplete="off"><button class="clr" id="qclr" aria-label="清空">×</button><div class="qres" id="qres"></div></div>
+  <div class="chips" id="tierchips"></div>
+  <div class="stat" id="stat"></div>
+  <div class="kbox" id="kbox"></div>
+  <button id="expx" title="把当前筛选结果导出为 Markdown">导出清单</button>
+  <a class="dlbtn" href="https://aka.doubaocdn.com/s/8q2GxAJw6B" download="网安词条库-2667条.json" title="2667 条词条原始数据（含 status：core/active/frontier/legacy）">下载词条库 2667</a><a class="dlbtn" href="https://aka.doubaocdn.com/s/4ubRVqvWeh" download="网安Agent索引-2667条.json" title="给 Agent 用：含类/子类/词条三级 + status + 六段正文，可直接做 RAG 索引">Agent 索引</a><a class="dlbtn" href="https://aka.doubaocdn.com/s/q7NYoiyEeC" target="_blank" rel="noopener" title="110 个证据文件的目录：46 份直链 + 脚本样本包，带 SHA256 可核验">证据总目录</a>
+</div>
+<div class="legend-note">圆点＝证据进度（由证据等级自动派生，换设备一致）：灰 仅边界 / 黄 部分验证 / 绿 已验可复现</div>
+<div class="legend-note">等级：A 已验（本机可复现）· P 部分验 · B 待验（一手来源，用前先自验）· C 边界（不作结论）</div>
+<div class="tree-wrap"><div class="tree" id="tree"><svg id="edges"></svg></div></div>
+<div id="iview"></div>
+<div id="detail"><div class="empty">👆 点击任意节点，展开该类的全部子类与词条分布</div></div>
+<script>
+var D,NOTE={},ST,KN,SX,CX,SHORT,EV,RV,NOTE_READY=false,META_OK=false;
+var PTR=['https://cdn.jsdelivr.net/gh/qwqwqw123456/sec-tree-go@main/pointer.json',
+         'https://testingcf.jsdelivr.net/gh/qwqwqw123456/sec-tree-go@main/pointer.json',
+         'https://gh-proxy.com/https://raw.githubusercontent.com/qwqwqw123456/sec-tree-go/main/pointer.json'];
+function jget(u,ms){
+  return new Promise(function(res,rej){
+    var c=('AbortController' in window)?new AbortController():null;
+    var to=setTimeout(function(){if(c)c.abort();rej(0)},ms||8000);
+    fetch(u,{cache:'no-store',signal:c?c.signal:undefined})
+      .then(function(r){if(!r.ok){clearTimeout(to);throw 0}return r.json()})
+      .then(function(j){clearTimeout(to);res(j)},function(){clearTimeout(to);rej(0)});
+  });
+}
+function ptrRace(ms){
+  /* 三源并发，谁先回不算数，取 t 最新（防 jsDelivr 旧缓存冒充最新） */
+  return new Promise(function(resolve){
+    var ok=[],n=0,fin=false;
+    function done(){
+      if(fin)return; fin=true;
+      var best=null;
+      ok.forEach(function(j){ if(!j||!j.meta)return;
+        if(!best||(j.t||'')>(best.t||''))best=j; });
+      resolve(best);
+    }
+    PTR.forEach(function(u){
+      jget(u+(u.indexOf('?')<0?'?':'&')+'t='+Date.now(),ms)
+        .then(function(j){ if(j&&j.meta)ok.push(j); },function(){})
+        .then(function(){ if(++n===PTR.length)done(); });
+    });
+    setTimeout(done,ms+300);
+  });
+}
+function bootErr(t){
+  var d=document.createElement('div');
+  d.style.cssText='position:fixed;left:0;right:0;top:0;padding:12px 16px;background:#5a1d1d;color:#ffd6d6;font-size:13px;z-index:9999;line-height:1.6';
+  d.textContent=t+'（网络或缓存读不到）· 下拉刷新重试';
+  document.body.appendChild(d);
+}
+
+var VER={v:'v32',d:'2026-11-28'};
+(function(){var e=document.getElementById('ver');if(e)e.innerHTML='<i>'+VER.v+'</i> · 更新 '+VER.d+' · 从固定入口打开即最新版';})();
+
+var LOCAL_MODE=false,TOKENH=(function(){try{var t=localStorage.getItem('agent_token');return t?{'X-Agent-Token':t}:{}}catch(e){return {}}})();
+var SHADOW={v:'v32',sv:'s3',t:'2026-11-28',meta:'https://aka.doubaocdn.com/s/LQVqmnihLi',note:'https://aka.doubaocdn.com/s/UPAI5EdcyX'};
+function lget(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}}
+function lset(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function curPtr(){var s=lget('secTreePtr');return (s&&s.v&&s.meta)?s:SHADOW;}
+var P0=curPtr();
+(async function boot(){
+  if(/[?&]embed=1/.test(location.search)) document.body.classList.add('embed');
+  var meta=null;
+  try{
+    var r=await fetch('/api/tree/export',{cache:'no-store',headers:TOKENH});
+    if(r.ok){ meta=await r.json(); LOCAL_MODE=true; }
+  }catch(e){}
+  if(!meta){ try{ meta=await jget(P0.meta,12000); }catch(e){} }
+  if(!meta&&SHADOW.meta!==P0.meta){ try{ meta=await jget(SHADOW.meta,8000); }catch(e){} }
+  if(!meta){bootErr('数据结构包读取失败');return;}
+  META_OK=true;
+  var vv=document.getElementById('ver');
+  if(vv)vv.innerHTML=LOCAL_MODE
+    ? '<i>本地实时</i> · Agent 回写 · '+((meta.meta&&meta.meta.t)||'')
+    : '<i>'+(P0.v||'')+'</i> · 更新 '+(P0.t||'')+' · 固定入口';
+
+D=meta.D;
+SHORT=meta.SHORT;
+const COLW=250,NODEW=210,NODEH=62,GAP=16,TOP=56;
+const CANVAS_H=Math.max(560,Math.max(...D.tiers.map(t=>t.ids.length))*(NODEH+GAP));
+const COLORS=D.tiers.map(t=>t.c);
+const colOf={};D.tiers.forEach((t,i)=>t.ids.forEach(id=>colOf[id]=i));
+const tree=document.getElementById('tree');
+const nMax=Math.max(...D.tiers.map(t=>t.ids.length));
+tree.style.width=(D.tiers.length*COLW+20)+'px';
+tree.style.height=(CANVAS_H+TOP)+'px';
+// 图例
+document.getElementById('legend').innerHTML=D.tiers.map((t,i)=>'<span><i style="background:'+t.c+'"></i>'+t.t+'（'+t.ids.length+' 类）</span>').join('');
+// 层标题
+D.tiers.forEach((t,i)=>{
+  const h=document.createElement('div');h.className='tier-head';
+  h.style.left=(i*COLW+10)+'px';h.style.width=(COLW-20)+'px';
+  h.innerHTML=t.t+'<small>'+t.d+'</small>';h.style.color=t.c;tree.appendChild(h);
+});
+// 布局坐标
+const pos={};
+D.tiers.forEach((t,i)=>{
+  const ids=t.ids,n=ids.length;
+  const blockH=n*NODEH+(n-1)*GAP;
+  const startY=TOP+8;
+  ids.forEach((id,j)=>{pos[id]={x:i*COLW+20,y:startY+j*(NODEH+GAP),col:i}});
+});
+// 连线
+let paths='';
+const AUTO=((meta&&meta.auto_edges)||[]).map(e=>[e.from,e.to]);
+const autoKey=p=>AUTO.some(([a,b])=>a===p[0]&&b===p[1]||a===p[1]&&b===p[0]);
+function edgePath(a,b,color,dashed){
+  if(!pos[a]||!pos[b])return '';
+  const x1=pos[a].x+NODEW,y1=pos[a].y+NODEH/2;
+  const x2=pos[b].x,y2=pos[b].y+NODEH/2;
+  const dx=(x2-x1)*0.55;
+  return '<path d="M'+x1+','+y1+' C'+(x1+dx)+','+y1+' '+(x2-dx)+','+y2+' '+x2+','+y2+'" fill="none" stroke="'+color+'" stroke-opacity="'+(dashed?'0.85':'0.35')+'" stroke-width="'+(dashed?'2':'1.6')+'"'+(dashed?' stroke-dasharray="5 4"':'')+' data-a="'+a+'" data-b="'+b+'"'+(dashed?' data-auto="1"':'')+'/>';
+}
+D.edges.forEach(([a,b])=>{ if(!autoKey([a,b])) paths+=edgePath(a,b,COLORS[colOf[b]],false); });
+AUTO.forEach(([a,b])=>{ paths+=edgePath(a,b,'#5eead4',true); });
+const svg=document.getElementById('edges');
+svg.setAttribute('width',tree.style.width);svg.setAttribute('height',(CANVAS_H+TOP)+'px');
+svg.innerHTML=paths;
+// 节点
+EV=meta.EV;
+const evOf=id=>EV[id]||{lv:"B",note:"工具与知识在，尚未出可复现证据，用前先自验"};
+let sel=null;
+D.tiers.forEach((t,i)=>t.ids.forEach(id=>{
+  const c=D.cats[String(id)],p=pos[id];
+  if(!c){console.warn('missing cat',id);return}
+  const el=document.createElement('div');el.className='node';el.style.left=p.x+'px';el.style.top=p.y+'px';
+  el.style.setProperty('--tc',t.c);el.dataset.id=id;
+  el.innerHTML='<div class="nm">'+SHORT[id]+'</div><div class="meta">'+c.n+' 条 · '+c.subs.length+' 子类</div><div class="no">#'+id+'</div><div class="ev '+(evOf(id).lv==='A'?'evA':evOf(id).lv==='P'?'evP':evOf(id).lv==='C'?'evC':'evB')+'" title="证据等级：'+({A:'A 已验（本机可复现）',P:'P 部分验（仅覆盖部分子项）',B:'B 待验（用前先自验）',C:'C 边界（禁用作结论）'})[evOf(id).lv]+'">'+evOf(id).lv+'</div>';
+  el.addEventListener('click',()=>select(id));
+  tree.appendChild(el);
+}));
+function ancestors(id){const out=new Set();let changed=true;while(changed){changed=false;D.edges.forEach(([a,b])=>{if((b===id||out.has(b))&&!out.has(a)&&a!==id){out.add(a);changed=true}})}return out}
+function highlight(){
+  const anc=sel?ancestors(sel):new Set();
+  document.querySelectorAll('.node').forEach(el=>{const id=+el.dataset.id;el.classList.toggle('dim',!!sel&&id!==sel&&!anc.has(id))});
+  svg.querySelectorAll('path').forEach(p=>{const on=sel&&(+p.dataset.b===sel||+p.dataset.a===sel||(anc.has(+p.dataset.b)&&anc.has(+p.dataset.a)));p.setAttribute('stroke-opacity',on?'0.95':'0.15');p.setAttribute('stroke-width',on?'2.6':'1.4')});
+}
+document.getElementById('detail').addEventListener('click',e=>{
+  const mb=e.target.closest('.wmore');
+  if(mb){e.stopPropagation();const arr=(D.cats[sel].subs[+mb.dataset.si].items)||[];mb.parentNode.innerHTML=chipsOf(arr,sel,+mb.dataset.si,true);return;}
+  const wt=e.target.closest('.wt');
+  if(wt){e.stopPropagation();openItem(+wt.dataset.c,+wt.dataset.s,+wt.dataset.i);return;}
+  const it=e.target.closest('.sub-item'); if(!it) return;
+  it.classList.toggle('open');
+});
+RV=meta.RV;
+
+CX=meta.CX;SX=meta.SX;
+ST=meta.ST;
+const STL={core:"底层不变",active:"现行有效",frontier:"2026 前沿",legacy:"已弃用/被取代"};
+const stOf=(c,s,i)=>ST[c+"-"+s+"-"+i]||"active";
+KN=meta.KN;
+const TOT=Object.values(D.cats).reduce((a,c)=>a+c.n,0);const C25P=[["生物识别 1–29","LivDet/FaceForensics 等公开数据集 + 自建采集 demo 打活体检测(PAD)；对模板匹配器做 fuzz"],["通信电信 VoIP/SS7/5G 30–58","SIPp+Kamailio 自建 VoIP 靶场；Osmocom 开源 2G/4G 实验网(屏蔽室+授权频谱)；Open5GS+UERANSIM 本地仿真 5G 核心网"],["FPGA/ASIC 59–80","Yosys/Verilator 开源 EDA 跑硬件木马检测与侧信道功耗仿真；上板需自备 FPGA 开发板"],["智能卡与 SE 81–105","GlobalPlatform 卡模拟(vsmartcard/PCSC)+Java Card 仿真器；EMV 交易重放用自建 POS 模拟器"],["浏览器内核 106–130","本地编译 Chromium/V8 跑 libFuzzer；沙箱逃逸在自建 VM 内做（不出本机）"],["Web3/DeFi 131–153","✅已实测：Hardhat 本地链重入，脆弱库 5→1 ETH、攻击者净赚 5 ETH；安全库带锁被拦。可续做闪电贷/预言机操纵"],["暗网与匿名 154–175","✅已实测：自建 3 跳链路 + 512B cell，指纹识别 24/24=100%，全量填充后降到 62%。真实 Tor 本机不可达，故用自建链"],["社会工程 176–199","GoPhish 自建钓鱼演练平台；OSINT 与话术只对授权对象，域名自备"],["物理安全周界 200–219","Proxmark3 对自有门禁卡做复制/中继测试；锁具只拆自己的；周界传感器用仿真信号"],["IoMT 医疗物联 220–241","只走仿真：OpenICE/MDPnP 设备模拟器 + 公开波形数据集；不碰在体设备与真实病房"],["航空航海 242–263","ADS-B/AIS 被动接收（RTL-SDR 收公开广播，合法）；GNU Radio 离线 IQ 回放做伪造实验，不发信号"],["智能电网 264–284","GridLAB-D/MATPOWER/OpenDSS 潮流仿真 + IEC 61850 仿真器；不接真实电力设施"],["PQC 后量子 285–299","✅已实测：ML-KEM-512/768/1024、HQC-128、McEliece-348864、sntrup-761 + ML-DSA-44/65/87 + SLH-DSA-128f/256s，11/11 往返一致且篡改全拒"],["CDN 边缘 300–319","自建 nginx+Varnish 边缘节点做缓存投毒/键碰撞；边缘函数用免费档 Workers 做逻辑实验"],["可信/机密计算 320–339","SGX 用 Gramine 仿真、TPM 用 swtpm 模拟；TDX/SEV 需真实硬件"],["深度伪造 340–358","开源生成模型本地跑；检测用 FaceForensics++/DFDC 公开数据集训练与评测"],["反无人机 359–379","只仿真：GNU Radio 离线 IQ 回放 + 屏蔽室；不触碰真实空域与在飞设备"],["网络保险 380–396","纯业务建模：公开保单条款与损失分布做表格推演，不需要技术环境"],["灾备与混沌工程 397–412","Chaos Mesh/tc netem 注故障、自建双活与备份恢复演练，全套本地可做"],["太空 413–431","SatNOGS 公开遥测数据 + GNU Radio 仿真 + NASA cFS 软件在环；不向真实卫星上行"]];const c25HTML=()=>'<div class="p25"><b>可落地路径（按原文 20 段逐段）</b>'+C25P.map(x=>'<div><i>'+x[0]+'</i> · '+x[1]+'</div>').join('')+'</div>';
+const SUBT=Object.values(D.cats).reduce((a,c)=>a+c.subs.length,0);const CBASE=2370,CEXT=159;
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function evCmd(u){var x=String(u||''),q=x.split('#'),n=q[1]||q[0].split('/').pop();if(!/^https?:/.test(x))return '<code>'+esc(x)+'</code>';return '<a class="evlink" href="'+esc(x)+'" target="_blank" rel="noopener">'+esc(n)+' ↗</a>'}
+function chipsOf(arr,c,si,full){
+  const cut=full?arr:arr.slice(0,60);
+  return cut.map((x,idx)=>{const st=stOf(c,si+1,idx+1);const _v=pgu(c+'-'+(si+1)+'-'+(idx+1));return '<span class="wt'+(st==="frontier"?" st-f":st==="legacy"?" st-l":st==="core"?" st-c":"")+'" data-c="'+c+'" data-s="'+si+'" data-i="'+idx+'" data-st="'+st+'" data-pgu="'+_v+'" title="点开看这一条（'+STL[st]+'）">'+esc(x)+'</span>';}).join('')
+    +(full||arr.length<=60?'':'<button class="wmore" data-si="'+si+'">显示全部 '+arr.length+' 条 ▾</button>');
+}
+let NAMEID=null;
+function nameIdx(){
+  if(NAMEID)return NAMEID;
+  NAMEID={};
+  for(const k of Object.keys(D.cats)){const cc=D.cats[k];
+    cc.subs.forEach((ss,si)=>ss.items.forEach((nm,ii)=>{
+      const key=String(nm).replace(/\s+/g,'');
+      if(!NAMEID[key])NAMEID[key]=k+'-'+si+'-'+ii;
+    }));
+  }
+  return NAMEID;
+}
+function pnote(s){
+  const o={w:'',r:'',x:'',t:'',d:'',g:''}, M={'记':'r','关':'x','工':'t','防':'d','靶':'g'};
+  let cur='w';
+  const join=(a,b)=>(a&&/[A-Za-z0-9]/.test(a.slice(-1))&&/[A-Za-z0-9]/.test(b.charAt(0)))?a+' '+b:a+b;
+  String(s).split(/[｜\n]+(?=(?:讲什么|记|关|工|防|靶)：)/).forEach(raw=>{
+    const seg=raw.trim(); if(!seg)return;
+    const q=seg.indexOf('：'), tag=q>0?seg.slice(0,q).trim():'';
+    if(M[tag]){cur=M[tag];o[cur]=join(o[cur],seg.slice(q+1).replace(/\n+/g,' '));return;}
+    o[cur]=join(o[cur],seg.replace(/\n+/g,' '));
+  });
+  return o;
+}
+function triHTML(o){
+  if(!o)return '';
+  let h='';
+  if(o.x)h+='<p><b class="x2">关联易混</b>'+linkX(o.x)+'</p>';
+  if(o.t)h+='<p><b class="t2">工具命令</b>'+hi(o.t)+'</p>';
+  if(o.d)h+='<p><b class="d2">防御视角</b>'+hi(o.d)+'</p>';
+  return h?'<div class="tri">'+h+'</div>':'';
+}
+function hi(t){
+  const e=esc(t), q=(curQ||'').trim();
+  if(!q)return e;
+  const qe=esc(q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  try{return e.replace(new RegExp('('+qe+')','gi'),'<mark>$1</mark>');}catch(_){return e;}
+}
+function linkX(txt){
+  const idx=nameIdx();
+  return String(txt).split(/([、，；,;／\/])/).map(seg=>{
+    const raw=seg.trim(); if(!raw)return esc(seg);
+    const key=raw.replace(/\s+/g,'');
+    let hit=idx[key]?key:null;
+    if(!hit){for(const nm in idx){if(nm.length>=4&&key.length>=4&&(key.includes(nm)||nm.includes(key))){hit=nm;break;}}}
+    if(hit){const p=idx[hit].split('-');
+      return '<a class="xlink" data-c="'+p[0]+'" data-s="'+p[1]+'" data-i="'+p[2]+'">'+hi(seg)+'</a>';}
+    return hi(seg);
+  }).join('');
+}
+// 精确跳转：解析 (#C) / (#C-S) / (#C-S-I) / (#C-Sx) 编号，无编号退回按名匹配
+function linkRef(txt){
+  return String(txt).split(/([、，；,;／\/])/).map(seg=>{
+    if(!seg.trim())return esc(seg);
+    const m=seg.match(/#(\d+)(?:-[Ss]?(\d+))?(?:-(\d+))?/);
+    if(!m)return linkX(seg);
+    const c=+m[1], cat=D.cats[String(c)];
+    if(!cat)return linkX(seg);
+    const s=m[2]!==undefined?+m[2]-1:null, i=m[3]!==undefined?+m[3]-1:null;
+    if(s!==null){
+      if(!cat.subs[s])return linkX(seg);
+      if(i!==null&&cat.subs[s].items[i]===undefined)return linkX(seg);
+    }
+    const tip=i!==null?('跳到词条 '+c+'-'+(s+1)+'-'+(i+1)):(s!==null?('跳到子类 '+c+'-'+(s+1)):('跳到第 '+c+' 类'));
+    return '<a class="xlink xref" data-c="'+c+'"'+(s!==null?' data-s="'+s+'"':'')+(i!==null?' data-i="'+i+'"':'')
+      +' title="'+tip+'">'+hi(seg)+'</a>';
+  }).join('');
+}
+function gotoX(a){
+  const c=+a.dataset.c, s=a.dataset.s, i=a.dataset.i;
+  if(s!==undefined&&s!==''&&i!==undefined&&i!==''){openItem(c,+s,+i);return;}
+  select(c);
+  if(s!==undefined&&s!==''){
+    setTimeout(()=>{const el=document.querySelectorAll('#detail .sub-item')[+s];
+      if(el){el.classList.add('open');el.scrollIntoView({block:'center',behavior:'smooth'});}},220);
+  }
+}
+function bindXL(root){
+  root.querySelectorAll('.xlink,.xref').forEach(a=>{
+    if(a._bx)return; a._bx=1;
+    a.onclick=e=>{e.stopPropagation();gotoX(a);};
+  });
+}
+let GID=null;
+function gidOf(c,s,i){
+  if(!GID){GID={};let g=0;for(const k of Object.keys(D.cats)){const cc=D.cats[k];cc.subs.forEach((ss,si2)=>ss.items.forEach((_,ii)=>{GID[k+'-'+si2+'-'+ii]=++g;}));}}
+  return GID[c+'-'+s+'-'+i]||0;
+}
+var curView=null;
+function openItem(c,s,i,noScroll){curView={c:c,s:s,i:i};
+  const cat=D.cats[String(c)]; if(!cat)return; const sub=cat.subs[s]; if(!sub)return;
+  const it=sub.items[i]; if(it===undefined)return;
+  const ev=evOf(+c), g=gidOf(c,s,i), tot=D.total||2892;
+  const iv=document.getElementById('iview');
+  iv.innerHTML='<div class="ivc">'
+   +'<div class="ihead"><span class="igid">#'+g+' / '+TOT+'</span><span class="stb st-'+(function(){const st=stOf(c,s+1,i+1);return st})()+'" title="'+(function(){const st=stOf(c,s+1,i+1);return STL[st]})()+'">'+(function(){const st=stOf(c,s+1,i+1);return st})()+'</span><span class="iclose" id="ivx">✕</span></div>'
+   +'<h3 class="ititle">'+esc(it)+'</h3>'
+   +'<div class="imeta"><div>第 <b>'+c+'</b> 类 · '+esc(cat.nm)+'</div>'
+   +'<div>第 <b>'+(s+1)+'</b> 子类 · '+esc(sub.k)+'</div>'
+   +'<div>该子类第 <b>'+(i+1)+'</b> / '+sub.items.length+' 条 · 编码 <code>'+c+'-'+(s+1)+'-'+(i+1)+'</code></div></div>'
+   +(function(){if(!NOTE_READY&&!NOTE[c+'-'+(s+1)+'-'+(i+1)])return '<div class="note none">正文载入中…（首次打开需拉一次正文包，之后秒出）</div>';
+   const nt=NOTE[c+'-'+(s+1)+'-'+(i+1)];if(!nt)return '<div class="note none">这一条的知识条目还没补（按类分批进行中）</div>';
+   const o=pnote(nt);
+   let h='<div class="note"><div class="nh">这一条讲什么</div><p>'+hi(o.w)+'</p>';
+   if(o.r)h+='<p class="nt"><b>记住</b>'+hi(o.r)+'</p>';
+   if(o.x)h+='<p class="nt x"><b>关联易混</b>'+linkRef(o.x)+'</p>';
+   if(o.t)h+='<p class="nt t"><b>工具命令</b>'+hi(o.t)+'</p>';
+   if(o.d)h+='<p class="nt d"><b>防御视角</b>'+hi(o.d)+'</p>';
+   if(o.g)h+='<p class="nt g"><b>靶场复现</b>'+hi(o.g)+'</p>';
+   return h+'</div>';})()
+   +'<div class="kline"><i class="kb kb-'+(KN[c+'-'+(s+1)]||'K')+'">豆包掌握 · '+(KN[c+'-'+(s+1)]==='E'?'能复现':KN[c+'-'+(s+1)]==='N'?'不会':'能讲清')+'</i> <span>'+(KN[c+'-'+(s+1)]==='E'?'这一条我在本机跑过，有输出和证据文件':KN[c+'-'+(s+1)]==='N'?'这一条我只有名字，机制和实操都没验证过':'这一条我能讲清机制，但没在本机跑出实证')+'</span></div>'
+   +(RV[c+'-'+(s+1)+'-'+(i+1)]?'<div class="rv"><span>来源年份 '+RV[c+'-'+(s+1)+'-'+(i+1)].y+'</span></div>':'')
+   +'<div class="iev '+ev.lv+'"><b>证据 '+ev.lv+'</b> · '+esc(ev.note)+(ev.cmd?evCmd(ev.cmd):'')+'</div>'
+   +'<div class="inav"><button class="ibtn" id="ivp" '+(i>0?'':'disabled')+'>← 上一条</button>'
+   +'<button class="ibtn" id="ivn" '+(i<sub.items.length-1?'':'disabled')+'>下一条 →</button>'
+   +'<button class="ibtn cy" id="ivcopy">复制词条</button></div>'
+   +'<div class="itip">这一条能单独打开、单独分享：链接末尾就是 <code>#i='+c+'-'+(s+1)+'-'+(i+1)+'</code></div>'
+   +'</div>';
+  iv.classList.add('on'); document.body.classList.add('lock');
+  history.replaceState(null,'','#i='+c+'-'+(s+1)+'-'+(i+1));
+  if(!noScroll) iv.scrollTop=0;
+  document.getElementById('ivx').onclick=()=>{iv.classList.remove('on');document.body.classList.remove('lock');history.replaceState(null,'','#cat-'+sel);};
+  document.getElementById('ivcopy').onclick=e=>{const t=it+'\n位置：第'+c+'类 '+cat.nm+' / '+sub.k+'\n链接：'+location.href;
+    (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{e.target.textContent='已复制 ✓';setTimeout(()=>e.target.textContent='复制词条',1500)}).catch(()=>{e.target.textContent='复制失败';});};
+  const p=document.getElementById('ivp'),n=document.getElementById('ivn');
+  if(i>0)p.onclick=()=>openItem(c,s,i-1);
+  if(i<sub.items.length-1)n.onclick=()=>openItem(c,s,i+1);
+  bindXL(iv);
+}
+
+function select(id,noscroll){
+  sel=id;document.querySelectorAll('.node').forEach(el=>el.classList.toggle('sel',+el.dataset.id===id));highlight();
+  const c=D.cats[String(id)];const t=D.tiers[colOf[id]];
+  const mx=Math.max(...c.subs.map(s=>s.n));
+  const ev=evOf(id), pct=(s)=>Math.round(s.n/c.n*100);
+  const subs=c.subs.map((s,si)=>'<div class="sub-item" data-si="'+si+'" style="--tc:'+t.c+'"><div class="sk"><span>'+esc(s.k)+'</span>'+'<b>'+s.n+'</b></div><div class="stip">▸ 点这一行展开 '+s.n+' 条词条</div><div class="sbar"><div class="sfill" style="width:'+Math.round(s.n/mx*100)+'%"></div></div>'
+    +'<div class="sdet"><div>本类共 <b>'+c.n+'</b> 条，该子类 <b>'+s.n+'</b> 条 · 占 <b>'+pct(s)+'%</b> <i class="kb kb-'+(KN[id+'-'+(si+1)]||'K')+'">档 '+(KN[id+'-'+(si+1)]||'K')+'</i></div>'
+    +'<div>证据等级：<b>'+ev.lv+'</b> · '+ev.note+'</div>'+triHTML(SX[id+'-'+(si+1)])
+    +(ev.cmd?'<div>证据文件：'+evCmd(ev.cmd)+'</div>':'')
+    +'<div class="wl">'+(s.items&&s.items.length?chipsOf(s.items,id,si,c.subs.length===1):'<i>原文此子类无词条</i>')+'</div></div></div>').join('');
+  document.getElementById('detail').innerHTML='<div class="dh"><span style="color:'+t.c+';font-size:20px">◆</span><h2>第'+id+'类 · '+c.nm+'</h2><span class="badge">'+t.t+'</span><span class="badge">'+c.n+' 词条</span><span class="badge">'+c.subs.length+' 子类</span><span class="badge" style="color:'+(evOf(id).lv==='A'?'#3ddc97':evOf(id).lv==='P'?'#8ecbff':evOf(id).lv==='C'?'#ffb366':'#8fa3bf')+'">证据 '+evOf(id).lv+'</span><span class="hint">前置依赖已高亮</span></div><div class="db"><div class="evrow '+evOf(id).lv+'"><b>证据 '+evOf(id).lv+'</b> · '+evOf(id).note+(evOf(id).cmd?evCmd(evOf(id).cmd):'')+'</div>'+triHTML(CX[id])+(+id===27||+id===29?'<div class="rvnote">本类 '+(+id===27?29:9)+' 条正文含明确年份，词条卡已标「来源年份」；其余讲机制与手法，不带时效数字，故不标。</div>':'')+(id===25?c25HTML():'')+'<div class="strow">状态分布：'+(function(){const sc={frontier:0,active:0,legacy:0,core:0};c.subs.forEach((ss,si)=>ss.items.forEach((nm,ii)=>sc[stOf(+id,si+1,ii+1)]++));return '<b>'+sc.frontier+'</b> 前沿 · <b>'+sc.active+'</b> 现行 · <b>'+sc.core+'</b> 底层不变 · <b>'+sc.legacy+'</b> 已弃用';})()+'</div>'+subs+'</div>';
+  {const _d=document.getElementById('detail');
+   if(c.subs.length<=6){_d.querySelectorAll('.sub-item').forEach(e=>e.classList.add('open'));}
+   else{const _f=_d.querySelector('.sub-item');if(_f)_f.classList.add('open');}}
+  bindXL(document.getElementById('detail'));
+  history.replaceState(null,'','#cat-'+id);
+  if(!noscroll&&window.matchMedia('(max-width:720px)').matches){
+    document.getElementById('detail').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+}
+
+
+/* ===== 手脚：进度 / 搜索 / 层筛选 / 导出 ===== */
+const AUTO_PG={A:'learned',P:'doing'};
+function pgOf(id){return AUTO_PG[evOf(id).lv]||'new';}
+var PG=lget('secTreePG')||{};
+function pgu(g){var v=PG[g];return v?v.s:0;}
+function pgDone(){var n=0;for(var k in PG)if(PG[k].s===2)n++;return n;}
+function pgDoing(){var n=0;for(var k in PG)if(PG[k].s===1)n++;return n;}
+function pgSub(id,si){
+  var done=0,tot=0;
+  D.cats[id].subs.forEach((ss,ii)=>{ if(ii!==si)return;
+    (ss.items||[]).forEach((nm,xi)=>{tot++;if(pgu(id+'-'+(si+1)+'-'+(xi+1))===2)done++;});});
+  return [done,tot];
+}
+function pguBar(){
+  var d=pgDone(),t=TOT;
+  var pct=t?d/t*100:0, w=d>0?Math.max(1,Math.round(pct)):0;
+  var bi=document.getElementById('pgbi'); if(bi)bi.style.width=w+'%';
+  var m=document.getElementById('pgm');
+  if(m)m.innerHTML='已掌握 <b style="color:#3ddc97">'+d+'</b> / '+t+'（'+(d>0&&pct<1?'<1':pct.toFixed(1))+'%）· 在学 <b style="color:#f7b733">'+pgDoing()+'</b> · 只存本机';
+}
+function setPG(g,s){
+  if(s===0){delete PG[g];}else{PG[g]={s:s,t:Date.now()};}
+  lset('secTreePG',PG); pguBar(); renderStat();
+  document.querySelectorAll('#iview .pgbtn').forEach(b=>b.classList.toggle('on',+b.dataset.pg===s));
+  try{ if(sel!=null) reChipsSel(); }catch(e){}
+  try{ paintSPG(); }catch(e){}
+  try{ paintNodes(); }catch(e){}
+}
+function showKN(t){
+  const rows=[];
+  for(var id in D.cats){var c=D.cats[id];
+    c.subs.forEach(function(ss,si){var k=KN[id+'-'+(si+1)]||'K'; if(k===t)rows.push([+id,c.nm,ss.k,ss.n,si,evOf(+id).lv]);});}
+  var tot=0; rows.forEach(function(r){tot+=r[3]});
+  var tname={E:'我能复现的',K:'我只能讲清的',N:'我不知道的'}[t];
+  var note={E:'这些我在本机跑过，有输出、有证据文件，敢说会做。',K:'机制我能讲清楚，但没在本机跑出实证——只算懂原理，不算会做。',N:'只知道名字，机制和实操都没有。这几块是我现在明确的空白。'}[t];
+  var h='<div class="dh"><h2>'+tname+' '+rows.length+' 个子类 / '+tot+' 条</h2></div><div class="db">'
+   +'<div class="evrow '+(t==='E'?'A':t==='K'?'P':'B')+'">'+note+'</div>'
+   +rows.map(function(r){return '<div class="knrow" data-c="'+r[0]+'" data-s="'+r[4]+'"><b>第'+r[0]+'类 '+esc(r[1])+'</b><span>'+esc(r[2])+'</span><em>证据 '+r[5]+'</em><i>'+r[3]+' 条</i></div>'}).join('')
+   +'</div>';
+  var d=document.getElementById('detail'); d.innerHTML=h;
+  d.querySelectorAll('.knrow').forEach(function(el){el.onclick=function(){
+    var c=+el.dataset.c; select(c);
+    var it=d.querySelectorAll('.sub-item')[[+el.dataset.s]]; if(it)it.classList.add('open');
+  }});
+  history.replaceState(null,'','#kn-'+t);
+  d.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function paintSPG(){
+  document.querySelectorAll('#detail .sub-item').forEach(el=>{
+    const si=+el.dataset.si; if(isNaN(si))return;
+    const r=pgSub(sel,si);
+    let e2=el.querySelector('.spg');
+    if(r[0]>0){ if(!e2){e2=document.createElement('span');e2.className='spg';const sk=el.querySelector('.sk');sk&&sk.insertBefore(e2,sk.querySelector('b'));} e2.textContent='已掌握 '+r[0]+'/'+r[1]; }
+    else if(e2){ e2.remove(); }
+  });
+}
+function reChipsSel(){
+  document.querySelectorAll('#detail .wl').forEach(box=>{
+    box.querySelectorAll('.wt').forEach(w=>{
+      const g=w.dataset.c+'-'+(+w.dataset.s+1)+'-'+(+w.dataset.i+1);
+      const v=pgu(g); w.classList.toggle('pgu1',v===1); w.classList.toggle('pgu2',v===2);
+    });
+  });
+}
+function randPick(mode){
+  const pool=[];
+  Object.keys(D.cats).forEach(c=>D.cats[c].subs.forEach((ss,si)=>(ss.items||[]).forEach((nm,xi)=>{
+    const g=c+'-'+(si+1)+'-'+(xi+1), v=pgu(g);
+    if(mode==='new'&&v===0)pool.push([+c,si,xi]);
+    if(mode==='rev'&&v===2)pool.push([+c,si,xi]);
+  })));
+  if(!pool.length){ bootAsk(mode==='rev'?'你还没有标记「已掌握」的条目，先看几条标记一下':'没有「未学」的条目了，全都被你标过了'); return; }
+  const r=pool[Math.floor(Math.random()*pool.length)];
+  openItem(r[0],r[1],r[2],true);
+}
+function bootAsk(t){
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;left:16px;right:16px;bottom:24px;padding:12px 16px;background:#1b2a3d;border:1px solid #2b4a6f;border-radius:10px;color:#dbe6f3;font-size:13px;z-index:9998;line-height:1.6';
+  d.textContent=t; document.body.appendChild(d);
+  setTimeout(()=>{d.remove()},2600);
+}
+let curTier=-1, curQ='', evOnly=false;
+function paintNodes(){
+  document.querySelectorAll('.node').forEach(el=>{const v=pgOf(el.dataset.id);
+    if(v==='new'){el.removeAttribute('data-pg')}else{el.setAttribute('data-pg',v)}});
+}
+function renderStat(){
+  const idsAll=Object.keys(EV);
+  const done=idsAll.filter(i=>pgOf(i)==='learned'), doing=idsAll.filter(i=>pgOf(i)==='doing');
+  const words=done.reduce((a,i)=>a+(D.cats[i]?D.cats[i].n:0),0);
+  const evA=Object.keys(EV).filter(k=>EV[k].lv==='A').length,
+        evP=Object.keys(EV).filter(k=>EV[k].lv==='P').length,
+        evC=Object.keys(EV).filter(k=>EV[k].lv==='C').length, evB=Object.keys(EV).length-evA-evP-evC;
+let ce=0,ck=0,cn=0,we=0,wk=0,wn=0;
+for(const id in D.cats){D.cats[id].subs.forEach((ss,si)=>{const t=KN[id+'-'+(si+1)]||'K';if(t==='E'){ce++;we+=ss.n}else if(t==='N'){cn++;wn+=ss.n}else{ck++;wk+=ss.n}});}
+document.getElementById('stat').innerHTML='实证 <b>'+ce+'</b>/'+SUBT+' 子类（'+we+' 词条）· 讲得清 <b>'+ck+'</b>（'+wk+' 词条）· 空白 <b>'+cn+'</b>（'+wn+' 词条）'
+  +'<span style="color:#3ddc97"> · 类级已验 '+evA+'</span>'
+  +(evP?'<span style="color:#8ecbff"> 部分 '+evP+'</span>':'')
+  +(evB?'<span style="color:#8fa3bf"> 待验 '+evB+'</span>':'');
+  var kb=document.getElementById('kbox');
+  if(kb)kb.innerHTML='<div class="kc e" data-k="E"><b>'+we+'</b><span>我能复现</span><i>'+ce+' 个子类 · 本机跑过有输出</i></div>'
+    +'<div class="kc k" data-k="K"><b>'+wk+'</b><span>我只能讲清</span><i>'+ck+' 个子类 · 没跑过实证</i></div>'
+    +'<div class="kc n" data-k="N"><b>'+wn+'</b><span>我不知道</span><i>'+cn+' 个子类 · 只有名字</i></div>'
+  +(evC?'<span style="color:#ffb366"> 边界 '+evC+'</span>':'');
+}
+function noteHit(raw,q){
+  const segs=String(raw).split(/[｜\n]/);
+  for(const s of segs){
+    const body=s.replace(/^(讲什么|记|关|工|防|靶)：/,'');
+    const p=body.toLowerCase().indexOf(String(q).toLowerCase());
+    if(p<0)continue;
+    const f=s.startsWith('关：')?'关联':s.startsWith('工：')?'工具':s.startsWith('防：')?'防御':s.startsWith('记：')?'记住':s.startsWith('靶：')?'靶场':'讲什么';
+    const a=Math.max(0,p-12), b=Math.min(body.length,p+q.length+22);
+    return {f:f,seg:(a>0?'…':'')+body.slice(a,b)+(b<body.length?'…':'')};
+  }
+  return {f:'知识',seg:''};
+}
+function snip(t,q){
+  const src=String(t), lo=src.toLowerCase(), qq=String(q).toLowerCase(), p=lo.indexOf(qq);
+  if(p<0)return '';
+  const a=Math.max(0,p-12), b=Math.min(src.length,p+qq.length+22);
+  return (a>0?'…':'')+src.slice(a,b)+(b<src.length?'…':'');
+}
+function searchIdx(q){
+  q=q.trim().toLowerCase(); if(!q) return [];
+  const hits=[]; const ids=Object.keys(D.cats);
+  for(const id of ids){
+    const c=D.cats[id], short=(SHORT[id]||'');
+    if(c.nm.toLowerCase().includes(q)||short.toLowerCase().includes(q)||q==='#'+id||q===id){
+      hits.push({id:+id,where:'类',label:c.nm,extra:c.n+' 条'});continue;
+    }
+    const subs=c.subs.filter(s=>s.k.toLowerCase().includes(q));
+    if(subs.length){
+      const n=subs.reduce((a,b)=>a+b.n,0);
+      hits.push({id:+id,where:'子类',label:subs.map(s=>s.k).join('、').slice(0,64),extra:subs.length+' 处命中 · '+n+' 条'});continue;
+    }
+    const cxT=CX[id]?'关联易混'+CX[id].x+' 工具命令'+CX[id].t+' 防御视角'+CX[id].d:'';
+    if(cxT&&cxT.toLowerCase().includes(q)){hits.push({id:+id,where:'类知识',label:c.nm,extra:'类级 关联/工具/防御 命中',seg:snip(cxT,q)});continue;}
+    let sxi=0;
+    for(let si=0;si<c.subs.length&&sxi<2;si++){const o=SX[id+'-'+(si+1)];if(!o)continue;
+      const t2='关联易混'+o.x+' 工具命令'+o.t+' 防御视角'+o.d;
+      if(t2.toLowerCase().includes(q)){hits.push({id:+id,where:'子类知识',label:c.subs[si].k,extra:(SHORT[id]||'')+' · 共 '+c.subs[si].n+' 条',si:si,seg:snip(t2,q)});sxi++;}}
+    let got=0;
+    for(let si=0;si<c.subs.length&&got<8;si++){
+      const s=c.subs[si], its=s.items||[];
+      for(let i2=0;i2<its.length;i2++){const it=its[i2];
+        const nt=(NOTE[id+'-'+(si+1)+'-'+(i2+1)]||'').toLowerCase();
+        const BND=/^[a-z0-9_.-]{2,}$/.test(q)?new RegExp('\\b'+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i'):null;
+        if(it.toLowerCase().includes(q)||nt.includes(q)){const raw=NOTE[id+'-'+(si+1)+'-'+(i2+1)]||'';const nh=it.toLowerCase().includes(q)?{f:'词条',seg:''}:noteHit(raw,q);const p=(BND&&!BND.test(it)&&!BND.test(raw))?1:0;hits.push({id:+id,where:nh.f,label:it,extra:(SHORT[id]||'')+' · '+s.k,si:si,seg:nh.seg,p:p});if(++got>=8)break;}
+      }
+    }
+  }
+  hits.sort((a,b)=>(a.p||0)-(b.p||0));
+  return hits;
+}
+function syncNote(){const n=document.querySelector('.legend-note');if(n)n.style.display=curQ?'none':'';}
+function applyFilter(){
+  const ids = curQ ? searchIdx(curQ).map(h=>h.id) : null;
+  document.querySelectorAll('.node').forEach(el=>{
+    const id=+el.dataset.id;
+    let ok = curTier<0 || colOf[id]===curTier;
+    if(ok && evOnly) ok = evOf(id).lv==='A';
+    if(ok && ids) ok = ids.indexOf(id)>=0;
+    el.classList.toggle('faded',!ok);
+  });
+}
+function renderChips(){
+  const box=document.getElementById('tierchips');
+  box.innerHTML='<button class="chip on" data-t="-1">全部层</button>'+D.tiers.map((t,i)=>'<button class="chip" data-t="'+i+'">'+t.t+'（'+t.ids.length+'）</button>').join('')+'<button class="chip" data-t="ev" style="border-color:#3ddc9766;color:#8ee7bf">仅看已验</button>';
+  box.onclick=e=>{const b=e.target.closest('.chip'); if(!b) return;
+    if(b.dataset.t==='ev'){evOnly=!evOnly; if(evOnly) curTier=-1;}
+    else {curTier=+b.dataset.t; evOnly=false;}
+    box.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on', c===b ? (c.dataset.t!=='ev'||evOnly) : false));
+    if(b.dataset.t==='ev'&&evOnly) b.classList.add('on');
+    applyFilter();};
+}
+function buildMd(){
+  const stat={new:'未开始',doing:'在学',learned:'已掌握'};
+  const qIds = curQ ? searchIdx(curQ).map(h=>h.id) : Object.keys(D.cats).map(Number);
+  const list = qIds.filter(id=>curTier<0||colOf[id]===curTier).sort((a,b)=>a-b);
+  const out=['# 网络安全技能树 · 导出清单','','导出时间：'+new Date().toLocaleString('zh-CN')+'｜筛选：'+(curTier<0?'全部层':D.tiers[curTier].t)+(curQ?'｜关键词：'+curQ:'')+'｜共 '+list.length+' 类',''];
+  let total=0;
+  list.forEach(id=>{
+    const c=D.cats[id], t=D.tiers[colOf[id]]; total+=c.n;
+    out.push('## 第'+id+'类 · '+c.nm,'','- 层：'+t.t+'（'+t.d+'）','- 词条：'+c.n+'　子类：'+c.subs.length+'　进度：'+stat[pgOf(id)]+'　证据：'+evOf(id).lv,'- 证据说明：'+evOf(id).note);
+    c.subs.forEach(s=>out.push('- '+s.k+'：'+s.n));
+    out.push('');
+  });
+  out.splice(5,0,'合计词条：'+total);
+  return out.join('\n');
+}
+function download(text,name){
+  const b=new Blob([text],{type:'text/markdown;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
+}
+function goHash(){
+  const m=location.hash.match(/#i=(\d+)-(\d+)-(\d+)/); if(!m)return;
+  const c=+m[1],s=+m[2]-1,i=+m[3]-1;
+  setTimeout(()=>{
+    select(c);
+    const el=document.querySelectorAll('#detail .sub-item')[s];
+    if(el){el.classList.add('open'); const w=el.querySelectorAll('.wt')[i];
+      if(w){w.scrollIntoView({block:'center'});openItem(c,s,i,true);}
+      else{const more=el.querySelector('.wmore');
+        if(more){more.click();setTimeout(()=>{const ws=el.querySelectorAll('.wt')[i];if(ws){ws.scrollIntoView({block:'center'});openItem(c,s,i,true);}},60);}}
+    }
+  },260);
+}
+goHash(); window.addEventListener('hashchange',()=>{goHash();});
+(function(){
+  const box=document.getElementById('qres'), q=document.getElementById('q');
+  let t=null;
+  q.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{
+    curQ=q.value.trim(); applyFilter();
+    syncNote();
+    if(!curQ){box.style.display='none';return;}
+    const hits=searchIdx(curQ); box.style.display='block';
+    box.innerHTML = hits.length
+      ? hits.slice(0,12).map(h=>'<div data-id="'+h.id+'" data-si="'+(h.si===undefined?'':h.si)+'"><span><b>#'+h.id+'</b> '+hi(h.label)+(h.seg?'<em>　'+hi(h.seg)+'</em>':'')+'</span><small>'+h.where+' · '+esc(h.extra)+'</small></div>').join('')
+      : '<div class="none">没匹配到，试试：域渗透 / 沙箱 / 密码 / #26</div>';
+    box.querySelectorAll('div[data-id]').forEach(d=>d.onclick=()=>{
+      const si=d.dataset.si; select(+d.dataset.id); box.style.display='none';
+      if(si!==''&&si!==undefined){const el=document.querySelectorAll('#detail .sub-item')[+si];
+        if(el){el.classList.add('open');el.scrollIntoView({block:'center',behavior:'smooth'});}}
+    });
+    if(hits.length) select(hits[0].id);
+  },160);};
+  document.getElementById('qclr').onclick=()=>{q.value='';curQ='';box.style.display='none';applyFilter();syncNote();q.focus();};
+  q.onkeydown=e=>{
+    if(e.key==='Enter'){const h=searchIdx(q.value);if(h.length){select(h[0].id);box.style.display='none'}}
+    if(e.key==='Escape'){document.getElementById('qclr').click()}
+  };
+  document.getElementById('expx').onclick=()=>{
+    const d=new Date(), z=n=>String(n).padStart(2,'0');
+    download(buildMd(),'网安技能树清单-'+d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+'.md');
+  };
+})();
+renderChips();renderStat();paintNodes();
+document.getElementById('kbox').onclick=e=>{const d=e.target.closest('.kc');if(d)showKN(d.dataset.k)};
+if(!location.hash){ try{ select(1,true); }catch(e){} }
+setTimeout(function(){ if(document.body.classList.contains('embed')) window.scrollTo(0,0); },30);
+(function(){const m=/cat-(\d+)/.exec(location.hash);if(m){const id=+m[1];if(D.cats[id])select(id)}})();
+
+
+  /* 正文包后台加载：不挡首屏，到了再刷当前视图 */
+  (function(){var N0=(P0.note||SHADOW.note);
+   jget(N0,30000).then(function(n){
+    if(!n)return; NOTE=n; NOTE_READY=true;
+    try{ if(curView) openItem(curView.c,curView.s,curView.i,true); }catch(e){}
+    try{ if(window.__reSearch) window.__reSearch(); }catch(e){}
+    try{ paintNodes(); }catch(e){}
+   },function(){});
+  })();
+  /* 指针后台校验：版本一致就什么都不做；不一致写本地并自动刷一次 */
+  ptrRace(5000).then(function(p){
+    if(LOCAL_MODE){ return; }   /* 本地实时模式：不追远端指针，避免被新壳替换掉 */
+    if(!p||!p.meta)return;
+    /* 壳升级：指针里的壳版本与我不同，直接去新壳，链接照样不用换 */
+    try{ if(p.shellV&&p.shellV!==SHADOW.sv){ location.replace(p.url); return; } }catch(e){}
+    if(p.v===P0.v&&p.meta===P0.meta)return;
+    lset('secTreePtr',{v:p.v,meta:p.meta,note:p.note,t:p.t});
+    try{ if(sessionStorage.getItem('secTreeReloaded'))return; sessionStorage.setItem('secTreeReloaded','1'); }catch(e){}
+    location.reload();
+  });
+})();
+</script></body></html>

@@ -298,6 +298,24 @@ def _tree_command(args: argparse.Namespace, cfg: Config) -> int:
         for edge in state["auto_edges"]:
             print(f"  #{edge['from']} → #{edge['to']}  ×{edge['count']}  {'/'.join(edge['sessions'])}")
         return 0
+    if cmd == "fresh":
+        from .core.freshness import Freshness
+
+        fresh = Freshness(ledger)
+        if args.file:
+            payload = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            res = fresh.ingest(payload, days=int(args.days), limit=int(args.limit))
+        else:
+            res = fresh.fetch(days=int(args.days), limit=int(args.limit))
+        if not res.get("ok"):
+            print(f"抓取失败：{res.get('error')}", file=sys.stderr)
+            print(f"现有候选 {res.get('total', 0)} 条，未写新数据", file=sys.stderr)
+            return 1
+        print(f"新增候选 {res['added']} 条（累计 {res['total']}），已写 {res['path']}")
+        for item in res.get("items", []):
+            cats = ", ".join(f"#{c['no']}" for c in item["cats"])
+            print(f"  {item['id']} {item['date']} [{cats}] {item['title'][:44]}")
+        return 0
     if cmd == "export":
         out = Path(args.out).expanduser()
         path = ledger.export(out)
@@ -1514,6 +1532,10 @@ def main(argv: list[str] | None = None) -> int:
     t_ingest.add_argument("--scan", action="store_true", help="扫最近会话批量回写")
     t_ingest.add_argument("--limit", type=int, default=30, help="--scan 时最多扫多少条（默认 30）")
     tree_sub.add_parser("edges", help="列出由共现自动生成的边")
+    t_fresh = tree_sub.add_parser("fresh", help="抓公开漏洞源进 P 候选队列（不自动升 A）")
+    t_fresh.add_argument("--days", type=int, default=30, help="只看最近 N 天（0=不限）")
+    t_fresh.add_argument("--limit", type=int, default=50, help="本次最多入队多少条")
+    t_fresh.add_argument("--file", default="", help="离线 JSON（跳过网络，用于复现）")
     t_export = tree_sub.add_parser("export", help="导出成图谱可吃的 EV/edges JSON")
     t_export.add_argument("--out", default="tree-export.json", help="输出路径")
 

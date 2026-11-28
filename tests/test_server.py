@@ -84,7 +84,7 @@ def test_tree_endpoints_expose_state_and_validate(tmp_path) -> None:
         scan = client.post("/api/tree/scan", json={"limit": 1}).json()
         assert set(scan) == {"scanned", "written", "skipped", "failed"}
         exported = client.get("/api/tree/export").json()
-        assert len(exported["payload"]["EV"]) == 29
+        assert len(exported["EV"]) == 29
 
 
 def test_run_endpoint_rejects_without_token(tmp_path) -> None:

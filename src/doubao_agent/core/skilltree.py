@@ -133,7 +133,7 @@ class TreeLedger:
                     lex.append((cat.no, 2.0, key.lower()))
             for item in cat.items:
                 item = str(item).strip()
-                if len(item) >= 3:
+                if len(item) >= 3 and not item.isdigit():
                     lex.append((cat.no, 1.0, item.lower()))
         alias: dict[str, list[str]] = {}
         if self.alias_path.is_file():
@@ -150,9 +150,15 @@ class TreeLedger:
                 continue
             for word in words or []:
                 word = str(word).strip().lower()
-                if len(word) >= 2:
+                if len(word) >= 2 and not word.isdigit():
                     lex.append((no, 3.0, word))
-        self._lex = lex
+        compiled: list[tuple[int, float, str, re.Pattern[str] | None]] = []
+        for no, weight, tok in lex:
+            pat = None
+            if tok.isascii() and re.search(r"[a-z0-9]", tok):
+                pat = re.compile(r"(?<![a-z0-9_])" + re.escape(tok) + r"(?![a-z0-9_])")
+            compiled.append((no, weight, tok, pat))
+        self._lex = compiled
 
     @property
     def ready(self) -> bool:
@@ -165,8 +171,9 @@ class TreeLedger:
         low = text.lower()
         scores: dict[int, float] = {}
         hits: dict[int, list[str]] = {}
-        for no, weight, tok in self._lex:
-            if tok and tok in low:
+        for no, weight, tok, pat in self._lex:
+            hit = bool(pat.search(low)) if pat else (tok in low)
+            if hit:
                 scores[no] = scores.get(no, 0.0) + weight
                 bucket = hits.setdefault(no, [])
                 if len(bucket) < 6 and tok not in bucket:
@@ -289,7 +296,7 @@ class TreeLedger:
         per: dict[int, dict[str, Any]] = {
             no: {"level": c.base_level, "base_level": c.base_level, "ok": 0, "fail": 0,
                  "upgraded": False, "regressed": False, "last_session": "", "note": "",
-                 "hits": []}
+                 "hits": [], "tools": {}}
             for no, c in self._cats.items()
         }
         pairs: dict[tuple[int, int], dict[str, Any]] = {}
@@ -301,6 +308,9 @@ class TreeLedger:
                 slot = per.get(no)
                 if slot is None:
                     continue
+                for tool in row.get("tools_ok") or []:
+                    slot.setdefault("tools", {})
+                    slot["tools"][tool] = slot["tools"].get(tool, 0) + 1
                 slot["last_session"] = row.get("session", "")
                 slot["note"] = row.get("note", "")
                 slot["hits"] = (c.get("hits") or [])[:5]
@@ -362,13 +372,14 @@ class TreeLedger:
                 "note": cat["note"] or f"自动回写：证据 {cat['ok']} 成功 / {cat['fail']} 失败",
             }
         edges = list(self._edges) + [[e["from"], e["to"]] for e in state["auto_edges"]]
-        payload = {
+        payload = dict(self._index)          # 先继承原页全部字段：D/SHORT/ST/KN/SX/CX/RV
+        payload.update({
             "meta": {"v": "v55+evidence", "t": time.strftime("%Y-%m-%d %H:%M", time.localtime())},
-            "D": self._index.get("D", {}),
+            "D": dict(self._index.get("D", {}), edges=edges),
             "EV": ev,
             "auto_edges": state["auto_edges"],
             "edges": edges,
-        }
+        })
         out = Path(path).expanduser()
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
         return out

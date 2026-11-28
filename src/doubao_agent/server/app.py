@@ -392,11 +392,22 @@ def create_app(config: Config) -> FastAPI:
             skipped += 0 if rec else 1
         return {"scanned": len(rows), "written": done, "skipped": skipped, "failed": failed}
 
+    @app.post("/api/tree/fresh")
+    async def tree_fresh(payload: dict[str, Any]) -> dict[str, Any]:
+        from ..core.freshness import Freshness
+
+        days = int((payload or {}).get("days", 30) or 30)
+        limit = int((payload or {}).get("limit", 50) or 50)
+        fresh = Freshness(_tree())
+        return await asyncio.to_thread(fresh.fetch, days=max(0, days), limit=max(1, min(limit, 200)))
+
     @app.get("/api/tree/export")
     async def tree_export() -> dict[str, Any]:
         tree = _tree()
         path = tree.export(tree.root / "tree-export.json")
-        return {"path": str(path), "payload": json.loads(path.read_text(encoding="utf-8"))}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["_path"] = str(path)
+        return payload
 
     @app.post("/api/sessions/{session_id}/resume")
     async def resume_session(session_id: str) -> dict[str, Any]:
@@ -589,5 +600,9 @@ def create_app(config: Config) -> FastAPI:
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/static/tree.html")
+    async def tree_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "tree.html")
 
     return app
