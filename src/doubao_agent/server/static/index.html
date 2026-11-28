@@ -3,89 +3,268 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237aa2ff'/%3E%3Cpath d='M8 10h16M8 16h10M8 22h13' stroke='%2308111f' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
 <title>豆包云电脑 · Agent 控制台</title>
 <style>
-  :root {
-    --bg: #0b0e14; --panel: #121722; --line: #1e2633; --text: #d7dde8;
-    --muted: #7c8798; --accent: #4f8cff; --ok: #38c172; --warn: #f0b429; --bad: #ef5b5b;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  :root{
+    --bg:#07090e; --bg-2:#0b0f17;
+    --panel:rgba(19,24,34,.72); --panel-2:rgba(26,32,44,.62);
+    --line:rgba(255,255,255,.075); --line-2:rgba(255,255,255,.145);
+    --text:#e8edf7; --muted:#8a94a6; --dim:#596274;
+    --accent:#7aa2ff; --accent-2:#5eead4;
+    --ok:#4ade80; --warn:#fbbf24; --bad:#fb7185;
+    --r:14px; --mono:ui-monospace,SFMono-Regular,JetBrains Mono,Menlo,Consolas,monospace;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; }
-  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
-    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
-  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
-  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .pill.up { color: var(--ok); border-color: rgba(56,193,114,.4); }
-  .pill.down { color: var(--bad); border-color: rgba(239,91,91,.4); }
-  .spacer { flex: 1; }
-  form { display: flex; gap: 8px; }
-  input { background: var(--panel); border: 1px solid var(--line); color: var(--text);
-    padding: 8px 12px; border-radius: 8px; width: 320px; outline: none; }
-  input:focus { border-color: var(--accent); }
-  button { background: var(--accent); color: #fff; border: 0; padding: 8px 16px;
-    border-radius: 8px; cursor: pointer; font-size: 13px; }
-  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
-  main { display: grid; grid-template-columns: 1.1fr .9fr 1.2fr; gap: 0; height: calc(100vh - 57px); }
-  section { border-right: 1px solid var(--line); overflow-y: auto; padding: 14px; }
-  section:last-child { border-right: 0; }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted);
-    margin: 4px 0 12px; font-weight: 600; }
-  .item { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px;
-    background: var(--panel); cursor: pointer; }
-  .item:hover { border-color: #2c3a52; }
-  .item.active { border-color: var(--accent); }
-  .row { display: flex; align-items: center; gap: 8px; }
-  .name { font-family: var(--mono); font-size: 12.5px; }
-  .desc { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.45;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tag { font-size: 10.5px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
-  .tag.L0 { color: var(--ok); } .tag.L1 { color: var(--accent); }
-  .tag.L2 { color: var(--warn); } .tag.L3 { color: var(--bad); }
-  .mono { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .log { font-family: var(--mono); font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
-  .ev { padding: 6px 8px; border-left: 2px solid var(--line); margin-bottom: 6px; }
-  .ev.start { border-color: var(--accent); } .ev.finish { border-color: var(--ok); }
-  .ev.permission { border-color: var(--warn); } .ev.tool_call { border-color: #3d4a63; }
-  .empty { color: var(--muted); font-size: 12px; padding: 12px 0; }
-  .status { font-size: 11px; padding: 1px 7px; border-radius: 4px; }
-  .completed { color: var(--ok); } .running { color: var(--accent); }
-  .incomplete, .failed { color: var(--bad); }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-size:13.5px;line-height:1.5;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(680px 380px at 12% -8%,rgba(122,162,255,.14),transparent 62%),
+      radial-gradient(620px 420px at 88% 4%,rgba(94,234,212,.09),transparent 66%),
+      radial-gradient(900px 600px at 50% 118%,rgba(122,162,255,.07),transparent 70%)}
+  .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}
+
+  /* ---------- top ---------- */
+  header{display:flex;align-items:center;gap:14px;padding:13px 22px;
+    border-bottom:1px solid var(--line);background:rgba(8,11,17,.72);backdrop-filter:blur(14px)}
+  .brand{display:flex;align-items:center;gap:11px;min-width:0}
+  .logo{width:30px;height:30px;border-radius:9px;flex:0 0 auto;display:grid;place-items:center;
+    background:linear-gradient(140deg,#7aa2ff,#5eead4);box-shadow:0 6px 18px rgba(122,162,255,.28)}
+  .logo svg{width:16px;height:16px}
+  .brand h1{margin:0;font-size:14.5px;font-weight:650;letter-spacing:.2px;white-space:nowrap}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:.12em;text-transform:uppercase}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:4px 10px;border-radius:999px;
+    border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+  .pill.up{color:#b7f7d0;border-color:rgba(74,222,128,.32);background:rgba(74,222,128,.08)}
+  .pill.up .dot{background:var(--ok);box-shadow:0 0 8px rgba(74,222,128,.8)}
+  .pill.down{color:#ffd0d8;border-color:rgba(251,113,133,.34);background:rgba(251,113,133,.08)}
+  .pill.down .dot{background:var(--bad)}
+  .live{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);
+    padding:4px 9px;border:1px solid var(--line);border-radius:999px}
+  .live .dot{width:6px;height:6px;border-radius:50%;background:var(--dim)}
+  .live.on{color:#cfeee6;border-color:rgba(94,234,212,.32)}
+  .live.on .dot{background:var(--accent-2);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
+  .spacer{flex:1}
+  form.run{display:flex;align-items:center;gap:8px}
+  .field{display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:11px;padding:0 12px;transition:border-color .18s,box-shadow .18s}
+  .field:focus-within{border-color:rgba(122,162,255,.55);box-shadow:0 0 0 3px rgba(122,162,255,.12)}
+  .field svg{width:14px;height:14px;color:var(--dim);flex:0 0 auto}
+  .field input{background:transparent;border:0;color:var(--text);width:330px;padding:9px 0;outline:none;font-size:13px}
+  .field input::placeholder{color:var(--dim)}
+  button{font:inherit;border:0;cursor:pointer;border-radius:11px;padding:9px 16px;font-size:13px;
+    color:#08111f;background:linear-gradient(135deg,#cfe0ff,#7aa2ff);
+    box-shadow:0 6px 16px rgba(122,162,255,.24);transition:transform .12s,filter .18s}
+  button:hover{filter:brightness(1.06)}
+  button:active{transform:translateY(1px)}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line-2);box-shadow:none}
+  button.ghost:hover{color:var(--text);border-color:rgba(255,255,255,.26)}
+
+  /* ---------- metrics strip ---------- */
+  .strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:12px 22px 0}
+  .stat{position:relative;overflow:hidden;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:10px 13px;display:flex;flex-direction:column;gap:2px}
+  .stat::after{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+    background:linear-gradient(180deg,var(--accent),var(--accent-2));opacity:.5}
+  .stat .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .stat .v{font-size:20px;font-weight:640;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:11.5px;font-weight:500;color:var(--muted);margin-left:4px}
+
+  /* ---------- layout ---------- */
+  main{flex:1;min-height:0;display:grid;grid-template-columns:1.02fr .84fr 1.3fr;gap:12px;padding:12px 22px 16px}
+  .panel{min-height:0;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--r);overflow:hidden;box-shadow:0 18px 40px rgba(0,0,0,.28)}
+  .panel > .head{display:flex;align-items:center;gap:9px;padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+  .head h2{margin:0;font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .head .count{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .head .right{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .body{flex:1;min-height:0;overflow-y:auto;padding:10px}
+  .body::-webkit-scrollbar{width:8px}
+  .body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10);border-radius:8px}
+  .body::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.18)}
+
+  .chips{display:flex;gap:5px;flex-wrap:wrap}
+  .chip{font-size:10.5px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);
+    color:var(--dim);cursor:pointer;user-select:none;transition:all .15s}
+  .chip.on{color:var(--text);border-color:rgba(122,162,255,.5);background:rgba(122,162,255,.12)}
+  .chip.l0.on{color:#bff7d4;border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.10)}
+  .chip.l1.on{color:#cddcff;border-color:rgba(122,162,255,.5);background:rgba(122,162,255,.12)}
+  .chip.l2.on{color:#ffe3a3;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.10)}
+  .chip.l3.on{color:#ffc7d1;border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.10)}
+  .mini{display:flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--line);
+    border-radius:9px;padding:0 8px}
+  .mini input{border:0;background:transparent;color:var(--text);outline:none;padding:6px 0;width:100%;font-size:12px}
+  .mini input::placeholder{color:var(--dim)}
+
+  /* ---------- tool cards ---------- */
+  .tool{position:relative;padding:9px 11px 9px 13px;margin-bottom:7px;border:1px solid var(--line);
+    border-radius:11px;background:linear-gradient(180deg,rgba(255,255,255,.025),transparent);
+    transition:border-color .15s,transform .15s,background .15s}
+  .tool:hover{border-color:var(--line-2);transform:translateY(-1px);background:rgba(255,255,255,.035)}
+  .tool::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--dim)}
+  .tool.L0::before{background:var(--ok)} .tool.L1::before{background:var(--accent)}
+  .tool.L2::before{background:var(--warn)} .tool.L3::before{background:var(--bad)}
+  .trow{display:flex;align-items:center;gap:6px;min-width:0}
+  .risk{font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:5px;border:1px solid var(--line-2);color:var(--muted)}
+  .risk.L0{color:#bff7d4;border-color:rgba(74,222,128,.35)}
+  .risk.L1{color:#cddcff;border-color:rgba(122,162,255,.35)}
+  .risk.L2{color:#ffe3a3;border-color:rgba(251,191,36,.35)}
+  .risk.L3{color:#ffc7d1;border-color:rgba(251,113,133,.35)}
+  .kind{font-size:10px;color:var(--dim);letter-spacing:.04em}
+  .tname{font-family:var(--mono);font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tdesc{margin-top:3px;color:var(--muted);font-size:11.5px;line-height:1.45;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+  /* ---------- sessions ---------- */
+  .sess{position:relative;padding:10px 12px;margin-bottom:7px;border:1px solid var(--line);border-radius:11px;
+    background:var(--panel-2);cursor:pointer;transition:all .15s}
+  .sess:hover{border-color:var(--line-2);background:rgba(255,255,255,.045)}
+  .sess.on{border-color:rgba(122,162,255,.55);background:rgba(122,162,255,.09);
+    box-shadow:0 0 0 1px rgba(122,162,255,.18),0 10px 24px rgba(0,0,0,.25)}
+  .sess::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:2px;border-radius:2px;background:var(--dim)}
+  .sess[data-status="completed"]::before{background:var(--ok)}
+  .sess[data-status="running"]::before{background:var(--accent)}
+  .sess[data-status="failed"]::before{background:var(--bad)}
+  .sess[data-status="incomplete"]::before{background:var(--warn)}
+  .sess .top{display:flex;align-items:center;gap:7px}
+  .sdot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}
+  .sdot.completed{background:var(--ok)} .sdot.running{background:var(--accent);animation:pulse 1.4s infinite}
+  .sdot.failed{background:var(--bad)} .sdot.incomplete{background:var(--warn)}
+  .stext{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+  .sid{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-left:auto}
+  .sess .task{margin-top:5px;font-size:12.5px;color:#dfe6f2;line-height:1.5;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .sess .meta{margin-top:6px;display:flex;gap:10px;font-size:10.5px;color:var(--dim);font-family:var(--mono)}
+
+  /* ---------- audit ---------- */
+  .ev{position:relative;padding:8px 10px 8px 22px;margin-bottom:6px;border-radius:9px;background:rgba(255,255,255,.022)}
+  .ev::after{content:"";position:absolute;left:11px;top:18px;bottom:-9px;width:1px;background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.02))}
+  .ev:last-child::after{display:none}
+  .ev::before{content:"";position:absolute;left:9px;top:12px;width:6px;height:6px;border-radius:50%;background:var(--dim)}
+  .ev.start::before{background:var(--accent);box-shadow:0 0 10px rgba(122,162,255,.6)}
+  .ev.finish::before{background:var(--ok)}
+  .ev.tool_call::before,.ev.tool_end::before{background:#7b879b}
+  .ev.permission::before{background:var(--warn)}
+  .ev .line{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--dim);font-family:var(--mono)}
+  .ev .tag{font-size:10px;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.06);color:var(--muted);letter-spacing:.03em}
+  .ev .txt{margin-top:3px;font-size:12px;color:#cfd7e5;word-break:break-word}
+  .ev code{font-family:var(--mono);font-size:11.5px;color:#cfe0ff;background:rgba(122,162,255,.10);
+    border:1px solid rgba(122,162,255,.18);padding:1px 5px;border-radius:5px}
+  .ok{color:var(--ok)} .fail{color:var(--bad)}
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+    height:100%;min-height:150px;color:var(--dim);font-size:12px;text-align:center;padding:20px}
+  .empty svg{width:34px;height:34px;opacity:.4}
+  footer{display:flex;align-items:center;gap:12px;padding:0 22px 12px;font-size:10.5px;color:var(--dim);font-family:var(--mono)}
+  footer .sep{opacity:.4}
+
+  @media (max-width:1180px){
+    body{overflow:auto}
+    .app{height:auto;min-height:100%}
+    main{grid-template-columns:1fr;padding:10px 12px 14px}
+    .panel{max-height:none}
+    .body{overflow:visible}
+    footer{display:none}
+    .strip{grid-template-columns:repeat(2,1fr);padding:10px 12px 0}
+    header{flex-wrap:wrap;gap:10px;padding:11px 12px}
+    .field input{width:min(52vw,300px)}
+    .brand .sub{display:none}
+  }
+  @media (max-width:560px){
+    .brand h1{font-size:13px}
+    form.run{width:100%}
+    .field{flex:1}
+    .field input{width:100%}
+    .strip{grid-template-columns:repeat(2,1fr)}
+    .stat .v{font-size:17px}
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>豆包云电脑 · Agent 控制台</h1>
-  <span id="health" class="pill">连接中</span>
-  <span id="summary" class="mono"></span>
-  <div class="spacer"></div>
-  <form id="runForm">
-    <input id="task" placeholder="输入任务，例如：整理 /workspace 下的文件清单" />
-    <button type="submit">执行</button>
-    <button type="button" class="ghost" id="refresh">刷新</button>
-  </form>
-</header>
-<main>
-  <section>
-    <h2>能力注册表 <span id="toolCount" class="mono"></span></h2>
-    <div id="tools"></div>
-  </section>
-  <section>
-    <h2>会话</h2>
-    <div id="sessions"></div>
-  </section>
-  <section>
-    <h2>审计回放 <span id="auditTitle" class="mono"></span></h2>
-    <div id="audit"><div class="empty">选择左侧会话查看执行轨迹</div></div>
-  </section>
-</main>
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#08111f" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h10M4 17h13"/></svg></div>
+      <div>
+        <h1>Agent 控制台</h1>
+        <div class="sub">doubao-agent · runtime</div>
+      </div>
+    </div>
+    <span id="health" class="pill"><span class="dot"></span>连接中</span>
+    <span id="live" class="live"><span class="dot"></span>LIVE</span>
+    <span class="spacer"></span>
+    <form class="run" id="runForm">
+      <div class="field">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="task" placeholder="丢一个任务，让它跑起来…" autocomplete="off" />
+      </div>
+      <button type="submit">执行</button>
+      <button type="button" class="ghost" id="refresh">刷新</button>
+    </form>
+  </header>
+
+  <div class="strip">
+    <div class="stat"><span class="k">工具</span><span class="v" id="mTools">–</span></div>
+    <div class="stat"><span class="k">通道在线</span><span class="v" id="mSources">–</span></div>
+    <div class="stat"><span class="k">会话</span><span class="v" id="mSessions">–</span></div>
+    <div class="stat"><span class="k">平均耗时</span><span class="v" id="mAvg">–<small>ms</small></span></div>
+  </div>
+
+  <main>
+    <section class="panel">
+      <div class="head">
+        <h2>能力注册表</h2><span class="count" id="toolCount"></span>
+        <div class="right chips" id="riskChips">
+          <span class="chip on" data-risk="all">全部</span>
+          <span class="chip l0" data-risk="L0">L0</span>
+          <span class="chip l1" data-risk="L1">L1</span>
+          <span class="chip l2" data-risk="L2">L2</span>
+          <span class="chip l3" data-risk="L3">L3</span>
+        </div>
+      </div>
+      <div class="head" style="border-bottom:1px solid var(--line);padding-top:0">
+        <div class="mini" style="flex:1">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:#596274"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="toolSearch" placeholder="按名称 / 描述搜索工具" />
+        </div>
+      </div>
+      <div class="body" id="tools"></div>
+    </section>
+
+    <section class="panel">
+      <div class="head"><h2>会话</h2><span class="count" id="sessCount"></span>
+        <div class="right"><span class="count" id="autoHint">每 4s 刷新</span></div>
+      </div>
+      <div class="body" id="sessions"></div>
+    </section>
+
+    <section class="panel">
+      <div class="head"><h2>审计回放</h2><span class="count" id="auditTitle"></span>
+        <div class="right"><span class="count" id="auditMeta"></span></div>
+      </div>
+      <div class="body" id="audit"><div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 9v12"/></svg><div>选择左侧会话查看执行轨迹</div><div style="font-size:11px;opacity:.7">每次工具调用、权限判定和收尾都在这里</div></div></div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="fVer">doubao-agent</span><span class="sep">·</span>
+    <span id="fKinds">—</span><span class="sep">·</span>
+    <span id="fUsage">—</span>
+    <span class="spacer"></span>
+    <span id="fClock"></span>
+  </footer>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
-let current = null;
 const TOKEN = new URLSearchParams(location.search).get('token')
   || localStorage.getItem('agent_token') || '';
 if (TOKEN) localStorage.setItem('agent_token', TOKEN);
+let current = null, toolsCache = [], riskFilter = 'all', query = '';
 
 async function getJSON(url, options) {
   options = options || {};
@@ -94,84 +273,192 @@ async function getJSON(url, options) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = (n) => String(n).padStart(2, '0');
+function ago(ts) {
+  if (!ts) return '';
+  const d = (Date.now() / 1000) - Number(ts);
+  if (d < 60) return '刚刚';
+  if (d < 3600) return Math.round(d / 60) + ' 分钟前';
+  if (d < 86400) return Math.round(d / 3600) + ' 小时前';
+  return Math.round(d / 86400) + ' 天前';
+}
+function clock() {
+  const n = new Date();
+  $('fClock').textContent = `${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())} ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+}
+setInterval(clock, 1000); clock();
 
+/* ---------- health & metrics ---------- */
 async function loadHealth() {
   try {
     const data = await getJSON('/api/health');
-    const bad = data.sources.filter(s => !s.ok);
-    $('health').textContent = bad.length ? `部分通道离线 (${bad.length})` : '通道正常';
-    $('health').className = 'pill ' + (bad.length ? 'down' : 'up');
-    const byKind = Object.entries(data.registry.by_kind).map(([k, v]) => `${k}:${v}`).join('  ');
-    $('summary').textContent = `工具 ${data.registry.tools}  |  ${byKind}`;
+    const bad = (data.sources || []).filter(s => !s.ok);
+    const el = $('health');
+    el.className = 'pill ' + (bad.length ? 'down' : 'up');
+    el.innerHTML = `<span class="dot"></span>${bad.length ? '部分通道离线 · ' + bad.length : '通道正常'}`;
+    const reg = data.registry || {};
+    $('mTools').textContent = reg.tools ?? '–';
+    $('mSources').textContent = `${(data.sources || []).filter(s => s.ok).length}/${(data.sources || []).length}`;
+    $('fKinds').textContent = Object.entries(reg.by_kind || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
+    const u = data.usage || {};
+    $('fUsage').textContent = u.total_tokens !== undefined
+      ? `tokens ${u.total_tokens}  ·  calls ${u.calls}` : '—';
   } catch (e) {
-    $('health').textContent = '离线';
     $('health').className = 'pill down';
+    $('health').innerHTML = '<span class="dot"></span>离线';
   }
 }
+async function loadMetrics() {
+  try {
+    const m = await getJSON('/api/metrics');
+    const avg = m.avg_ms;
+    if (avg === undefined || avg === null) $('mAvg').innerHTML = '–<small>ms</small>';
+    else if (Number(avg) >= 1000) $('mAvg').innerHTML = `${(Number(avg) / 1000).toFixed(1)}<small>s</small>`;
+    else $('mAvg').innerHTML = `${avg}<small>ms</small>`;
+  } catch (e) { /* 静默 */ }
+}
 
+/* ---------- tools ---------- */
 async function loadTools() {
-  const tools = await getJSON('/api/tools');
-  $('toolCount').textContent = `(${tools.length})`;
-  $('tools').innerHTML = tools.length ? tools.map(t => `
-    <div class="item">
-      <div class="row">
-        <span class="tag ${t.risk}">${t.risk}</span>
-        <span class="tag">${t.kind}</span>
-        <span class="name">${t.name}</span>
+  try {
+    toolsCache = await getJSON('/api/tools');
+  } catch (e) {
+    $('tools').innerHTML = emptyBox('工具加载失败', esc(e.message));
+    return;
+  }
+  renderTools();
+}
+function renderTools() {
+  const q = query.trim().toLowerCase();
+  const list = toolsCache.filter(t =>
+    (riskFilter === 'all' || t.risk === riskFilter) &&
+    (!q || t.name.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q)));
+  $('toolCount').textContent = `${list.length}/${toolsCache.length}`;
+  $('tools').innerHTML = list.length ? list.map(t => `
+    <div class="tool ${esc(t.risk)}">
+      <div class="trow">
+        <span class="risk ${esc(t.risk)}">${esc(t.risk)}</span>
+        <span class="kind">${esc(t.kind)}</span>
+        <span class="tname" title="${esc(t.name)}">${esc(t.name)}</span>
       </div>
-      <div class="desc" title="${escapeAttr(t.description)}">${escapeHtml(t.description)}</div>
-    </div>`).join('') : '<div class="empty">暂无工具：检查 MCP / API / 宿主桥配置</div>';
+      <div class="tdesc" title="${esc(t.description)}">${esc(t.description)}</div>
+    </div>`).join('') : emptyBox('没有匹配的工具', '换个关键词或取消风险筛选');
 }
 
+/* ---------- sessions ---------- */
 async function loadSessions() {
-  const sessions = await getJSON('/api/sessions');
-  $('sessions').innerHTML = sessions.length ? sessions.map(s => `
-    <div class="item ${current === s.id ? 'active' : ''}" onclick="selectSession('${s.id}')">
-      <div class="row">
-        <span class="status ${s.status}">${s.status}</span>
-        <span class="mono">${s.id}</span>
+  let list = [];
+  try { list = await getJSON('/api/sessions'); } catch (e) { return; }
+  $('mSessions').textContent = list.length;
+  $('sessCount').textContent = `${list.length} 条`;
+  $('sessions').innerHTML = list.length ? list.map(s => `
+    <div class="sess ${current === s.id ? 'on' : ''}" data-id="${esc(s.id)}" data-status="${esc(s.status)}">
+      <div class="top">
+        <span class="sdot ${esc(s.status)}"></span>
+        <span class="stext">${esc(s.status)}</span>
+        <span class="sid">${esc(s.id)}</span>
       </div>
-      <div class="desc">${escapeHtml(s.task)}</div>
-    </div>`).join('') : '<div class="empty">还没有会话</div>';
+      <div class="task">${esc(s.task)}</div>
+      <div class="meta"><span>step ${s.step ?? 0}</span><span>${ago(s.updated_at || s.created_at)}</span></div>
+    </div>`).join('') : emptyBox('还没有会话', '在上面输入框丢一个任务');
+  document.querySelectorAll('.sess').forEach(el =>
+    el.addEventListener('click', () => selectSession(el.dataset.id)));
 }
 
+/* ---------- audit ---------- */
 async function selectSession(id) {
   current = id;
+  document.querySelectorAll('.sess').forEach(el => el.classList.toggle('on', el.dataset.id === id));
   $('auditTitle').textContent = id;
-  await loadSessions();
-  const events = await getJSON(`/api/sessions/${id}/audit`);
-  $('audit').innerHTML = events.length ? events.map(e => {
-    const detail = e.event === 'tool_call'
-      ? `${e.tool} ${e.ok ? 'ok' : 'fail'} ${e.elapsed_ms || 0}ms${e.error ? ' · ' + e.error : ''}`
-      : e.event === 'permission'
-      ? `${e.tool} ${e.risk} · ${e.reason}`
-      : e.event === 'start' ? e.task
-      : e.answer || '';
-    return `<div class="ev ${e.event}"><span class="mono">${(e.ts || '').slice(11, 23)}</span>
-      <span class="tag">${e.event}</span> ${escapeHtml(String(detail || ''))}</div>`;
-  }).join('') : '<div class="empty">暂无记录</div>';
+  renderAuditLoading();
+  try {
+    const events = await getJSON(`/api/sessions/${encodeURIComponent(id)}/audit`);
+    $('auditMeta').textContent = `${events.length} 条事件`;
+    $('audit').innerHTML = events.length ? events.map(renderEvent).join('')
+      : emptyBox('这次会话没有审计记录', '');
+  } catch (e) {
+    $('audit').innerHTML = emptyBox('读取失败', esc(e.message));
+  }
+}
+function renderAuditLoading() {
+  $('auditMeta').textContent = '';
+  $('audit').innerHTML = '<div class="empty">加载中…</div>';
+}
+function renderEvent(e) {
+  const t = (e.ts || '').slice(11, 19);
+  let detail = '';
+  let tag = e.event || 'event';
+  if (e.event === 'tool_call') {
+    const cls = e.ok ? 'ok' : 'fail';
+    detail = `<code>${esc(e.tool)}</code> <span class="${cls}">${e.ok ? 'ok' : 'fail'}</span> · ${e.elapsed_ms || 0}ms${e.error ? ' · ' + esc(e.error) : ''}`;
+  } else if (e.event === 'permission') {
+    detail = `<code>${esc(e.tool)}</code> ${esc(e.risk)} · ${esc(e.reason)}`;
+  } else if (e.event === 'start') {
+    detail = esc(e.task);
+  } else {
+    detail = esc(e.answer || e.text || '');
+  }
+  return `<div class="ev ${esc(tag)}">
+    <div class="line"><span>${esc(t)}</span><span class="tag">${esc(tag)}</span></div>
+    <div class="txt">${detail}</div></div>`;
+}
+function emptyBox(title, sub) {
+  return `<div class="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 9v12"/></svg>
+    <div>${esc(title)}</div>${sub ? `<div style="font-size:11px;opacity:.7">${sub}</div>` : ''}
+  </div>`;
 }
 
-function escapeHtml(s) {
-  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
-
+/* ---------- run ---------- */
 $('runForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const task = $('task').value.trim();
   if (!task) return;
   $('task').value = '';
-  await getJSON('/api/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task }),
-  });
-  setTimeout(loadSessions, 300);
+  try {
+    await getJSON('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task }),
+    });
+    $('live').classList.add('on');
+    setTimeout(loadSessions, 300);
+  } catch (err) {
+    alert('提交失败：' + err.message);
+  }
 });
-$('refresh').addEventListener('click', () => { loadHealth(); loadTools(); loadSessions(); });
+$('refresh').addEventListener('click', () => { loadHealth(); loadMetrics(); loadTools(); loadSessions(); });
+$('toolSearch').addEventListener('input', (e) => { query = e.target.value; renderTools(); });
+$('riskChips').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip'); if (!chip) return;
+  riskFilter = chip.dataset.risk;
+  document.querySelectorAll('#riskChips .chip').forEach(c => c.classList.toggle('on', c === chip));
+  renderTools();
+});
 
-loadHealth(); loadTools(); loadSessions();
+/* ---------- SSE 实时 ---------- */
+(function connectSSE() {
+  try {
+    const url = '/api/events' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+    const es = new EventSource(url);
+    let timer = null;
+    es.onopen = () => $('live').classList.add('on');
+    es.onerror = () => $('live').classList.remove('on');
+    es.onmessage = (evt) => {
+      $('live').classList.add('on');
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.session && data.session === current && !timer) {
+          timer = setTimeout(() => { timer = null; selectSession(current); }, 400);
+        }
+      } catch (e) { /* 忽略非 JSON */ }
+      if (!timer) { timer = setTimeout(() => { timer = null; loadSessions(); }, 1200); }
+    };
+  } catch (e) { /* 老浏览器忽略 */ }
+})();
+
+loadHealth(); loadMetrics(); loadTools(); loadSessions();
 setInterval(() => { loadHealth(); loadSessions(); }, 4000);
 </script>
 </body>
